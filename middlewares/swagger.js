@@ -13,6 +13,10 @@ const options = {
     },
     servers: [
       {
+        url: "https://mavhu-project-api-node-backend.onrender.com",
+        description: "Local server",
+      },
+      {
         url: "http://localhost:8080",
         description: "Local server",
       },
@@ -294,7 +298,6 @@ const options = {
             "status",
           ],
         },
-        
 
         AuthProvider: {
           type: "object",
