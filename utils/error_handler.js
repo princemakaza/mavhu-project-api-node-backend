@@ -44,6 +44,7 @@ function normalizeError(err) {
   if (err?.name === "TokenExpiredError") {
     return new AppError("Token expired", 401, "TOKEN_EXPIRED");
   }
+  console.error("Unhandled error:", err);
   return new AppError("Server error", 500, "SERVER_ERROR");
 }
 

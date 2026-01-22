@@ -1,0 +1,24 @@
+[
+  {
+    "name": "CBZ Holdings Limited",
+    "registrationNumber": "CBZ-200001",
+    "email": "info@cbz.co.zw",
+    "phone": "+263242700000",
+    "address": "CBZ House, 5th Street, Harare, Zimbabwe",
+    "website": "https://www.cbz.co.zw",
+    "country": "Zimbabwe",
+    "industry": "Banking & Financial Services",
+    "description": "A leading financial services group in Zimbabwe offering banking, insurance, and investment services."
+  },
+  {
+    "name": "Tongaat Hulett Zimbabwe Limited",
+    "registrationNumber": "THZ-190055",
+    "email": "info@tongaat.co.zw",
+    "phone": "+263242700111",
+    "address": "Tongaat Hulett House, Cleveland Road, Harare, Zimbabwe",
+    "website": "https://www.tongaat.co.zw",
+    "country": "Zimbabwe",
+    "industry": "Agriculture & Sugar Production",
+    "description": "A leading sugar producer in Zimbabwe with extensive sugar cane plantations and milling operations."
+  }
+]

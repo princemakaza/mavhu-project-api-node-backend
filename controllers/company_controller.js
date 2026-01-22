@@ -1,4 +1,3 @@
-// controllers/company_controller.js
 const companyService = require("../services/company_service");
 const asyncHandler = require("../utils/async_handler");
 const AppError = require("../utils/app_error");
@@ -9,7 +8,7 @@ const JWT_EXPIRES_IN = "7d";
 
 function requireFields(body, fields = []) {
   const missing = fields.filter(
-    (f) => body?.[f] === undefined || body?.[f] === ""
+    (f) => body?.[f] === undefined || body?.[f] === "",
   );
   if (missing.length)
     throw new AppError("Missing required fields", 400, "MISSING_FIELDS", {
@@ -25,7 +24,7 @@ function generateCompanyToken(company) {
   return jwt.sign(
     { sub: company._id.toString(), type: "company", name: company.name },
     JWT_SECRET,
-    { expiresIn: JWT_EXPIRES_IN }
+    { expiresIn: JWT_EXPIRES_IN },
   );
 }
 
@@ -72,7 +71,7 @@ const getMyCompany = asyncHandler(async (req, res) => {
     throw new AppError(
       "Owner does not have a personal company context. Use /admin endpoints.",
       400,
-      "INVALID_CONTEXT"
+      "INVALID_CONTEXT",
     );
   }
 
@@ -102,6 +101,109 @@ const updateMyCompany = asyncHandler(async (req, res) => {
   res.status(200).json({
     message: "Company updated successfully",
     company: updated,
+  });
+});
+
+/**
+ * Get ESG summary for a company
+ * GET /api/companies/:id/esg-summary
+ */
+const getCompanyESGSummary = asyncHandler(async (req, res) => {
+  const summary = await companyService.getCompanyESGSummary(req.params.id);
+  res.status(200).json({
+    message: "ESG summary retrieved successfully",
+    summary,
+  });
+});
+
+/**
+ * Get companies by location
+ * GET /api/companies/location/search
+ */
+const getCompaniesByLocation = asyncHandler(async (req, res) => {
+  const { longitude, latitude, radius } = req.query;
+
+  if (!longitude || !latitude) {
+    throw new AppError(
+      "Longitude and latitude are required",
+      400,
+      "MISSING_FIELDS",
+    );
+  }
+
+  const radiusInMeters = radius ? parseInt(radius) : 10000; // Default 10km radius
+  const companies = await companyService.getCompaniesByLocation(
+    parseFloat(longitude),
+    parseFloat(latitude),
+    radiusInMeters,
+  );
+
+  res.status(200).json({
+    message: "Companies found near location",
+    companies,
+    count: companies.length,
+    searchParams: {
+      longitude: parseFloat(longitude),
+      latitude: parseFloat(latitude),
+      radius: radiusInMeters,
+    },
+  });
+});
+
+/**
+ * Get companies with data for a specific year
+ * GET /api/companies/data/year/:year
+ */
+const getCompaniesWithDataForYear = asyncHandler(async (req, res) => {
+  const year = parseInt(req.params.year);
+
+  if (isNaN(year) || year < 1900 || year > 2100) {
+    throw new AppError(
+      "Invalid year. Must be between 1900 and 2100",
+      400,
+      "INVALID_YEAR",
+    );
+  }
+
+  const companies = await companyService.getCompaniesWithDataForYear(year);
+
+  res.status(200).json({
+    message: `Companies with data for year ${year}`,
+    companies,
+    count: companies.length,
+    year,
+  });
+});
+
+/**
+ * Get companies by data range
+ * GET /api/companies/data/range
+ */
+const getCompaniesByDataRange = asyncHandler(async (req, res) => {
+  const { startYear, endYear } = req.query;
+
+  if (!startYear || !endYear) {
+    throw new AppError(
+      "Start year and end year are required",
+      400,
+      "MISSING_FIELDS",
+    );
+  }
+
+  const start = parseInt(startYear);
+  const end = parseInt(endYear);
+
+  if (isNaN(start) || isNaN(end) || start > end) {
+    throw new AppError("Invalid year range", 400, "INVALID_RANGE");
+  }
+
+  const companies = await companyService.getCompaniesByDataRange(start, end);
+
+  res.status(200).json({
+    message: `Companies with data overlapping range ${start}-${end}`,
+    companies,
+    count: companies.length,
+    range: { start, end },
   });
 });
 
@@ -149,6 +251,10 @@ module.exports = {
   registerCompanyByOwner,
   getMyCompany,
   updateMyCompany,
+  getCompanyESGSummary,
+  getCompaniesByLocation,
+  getCompaniesWithDataForYear,
+  getCompaniesByDataRange,
   adminGetCompanyById,
   adminUpdateCompanyById,
   adminDeleteCompanyById,
