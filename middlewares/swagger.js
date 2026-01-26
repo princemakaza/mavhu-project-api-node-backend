@@ -13,6 +13,10 @@ const options = {
     },
     servers: [
       {
+        url: "http://44.223.50.135:8080",
+        description: "AWS server",
+      },
+      {
         url: "https://mavhu-project-api-node-backend.onrender.com",
         description: "Local server",
       },
