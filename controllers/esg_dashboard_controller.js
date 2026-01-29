@@ -6,6 +6,8 @@ const CropYieldRiskData = require("../services/crop_yield_forecast_service");
 const GHGEmissionsData = require("../services/GHGEmissions_service");
 const BiodiversityLanduseData = require("../services/biodiversity_landuse_service");
 const IrrigationWaterRiskData = require("../services/irrigation_water_service");
+const FarmComplianceData = require("../services/farm_compliance_service");
+
 
 
 /**
@@ -116,7 +118,7 @@ const getFarmCompliance = asyncHandler(async (req, res) => {
   const { companyId } = req.params;
   const { year } = req.query;
 
-  const data = await esgDashboardService.getFarmComplianceData(
+  const data = await FarmComplianceData.getFarmComplianceData(
     companyId,
     year ? parseInt(year) : null
   );

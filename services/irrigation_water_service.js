@@ -3,14 +3,19 @@ const Company = require("../models/company_model");
 const AppError = require("../utils/app_error");
 const mongoose = require("mongoose");
 
+// Version constants
+const API_VERSION = process.env.API_VERSION || "1.0.0";
+const CALCULATION_VERSION = process.env.CALCULATION_VERSION || "1.0.0";
+
 /**
- * Enhanced helper function to extract all metrics with proper structure
+ * Helper function to extract metric values by name with proper error handling
  */
-async function getAllCompanyMetrics(companyId, years = []) {
+async function getMetricsByNames(companyId, metricNames, years = []) {
   try {
     const query = {
       company: companyId,
       is_active: true,
+      "metrics.metric_name": { $in: metricNames },
     };
 
     if (years.length > 0) {
@@ -20,138 +25,54 @@ async function getAllCompanyMetrics(companyId, years = []) {
     const esgData = await ESGData.find(query)
       .populate(
         "company",
-        "name industry country esg_reporting_framework latest_esg_report_year esg_data_status",
+        "name industry country area_of_interest_metadata esg_reporting_framework",
       )
-      .select("-__v")
       .lean();
 
-    // Organize all metrics by category
-    const allMetrics = {
-      environmental: [],
-      social: [],
-      governance: [],
-      companyInfo: {},
-    };
+    // Extract and organize metrics
+    const metrics = {};
 
-    if (esgData.length > 0) {
-      // Extract company information from ESG data
-      const companyData = esgData[0].company;
-      allMetrics.companyInfo = {
-        name: companyData?.name,
-        industry: companyData?.industry,
-        country: companyData?.country,
-        esgReportingFramework: companyData?.esg_reporting_framework || [],
-        latestEsgReportYear: companyData?.latest_esg_report_year,
-        esgDataStatus: companyData?.esg_data_status,
-        // Add metadata from ESGData
-        dataSource: esgData[0].data_source,
-        verificationStatus: esgData[0].verification_status,
-        dataQualityScore: esgData[0].data_quality_score,
-        reportingPeriod: {
-          start: esgData[0].reporting_period_start,
-          end: esgData[0].reporting_period_end,
-        },
-      };
-
-      // Extract all metrics
-      esgData.forEach((data) => {
-        data.metrics.forEach((metric) => {
-          const metricCategory = metric.category;
-          if (!allMetrics[metricCategory]) {
-            allMetrics[metricCategory] = [];
-          }
-
-          // Check if metric already exists
-          const existingMetricIndex = allMetrics[metricCategory].findIndex(
-            (m) => m.metric_name === metric.metric_name,
-          );
-
-          if (existingMetricIndex === -1) {
-            // Create new metric entry
-            const metricEntry = {
-              metric_name: metric.metric_name,
+    esgData.forEach((data) => {
+      data.metrics.forEach((metric) => {
+        if (metricNames.includes(metric.metric_name) && metric.is_active) {
+          if (!metrics[metric.metric_name]) {
+            metrics[metric.metric_name] = {
+              name: metric.metric_name,
+              category: metric.category,
               unit: metric.unit,
               description: metric.description,
-              is_active: metric.is_active,
-              category: metric.category,
               values: [],
             };
-
-            // Add values with filtering
-            metric.values.forEach((value) => {
-              if (years.length === 0 || years.includes(value.year)) {
-                metricEntry.values.push({
-                  year: value.year,
-                  value: value.value,
-                  numeric_value: value.numeric_value,
-                  source_notes: value.source_notes,
-                  added_by: value.added_by,
-                  added_at: value.added_at,
-                  last_updated_at: value.last_updated_at,
-                });
-              }
-            });
-
-            // Sort values by year
-            metricEntry.values.sort((a, b) => a.year - b.year);
-            allMetrics[metricCategory].push(metricEntry);
-          } else {
-            // Merge values from different ESGData documents
-            metric.values.forEach((value) => {
-              if (years.length === 0 || years.includes(value.year)) {
-                const existingValue = allMetrics[metricCategory][
-                  existingMetricIndex
-                ].values.find((v) => v.year === value.year);
-
-                if (!existingValue) {
-                  allMetrics[metricCategory][existingMetricIndex].values.push({
-                    year: value.year,
-                    value: value.value,
-                    numeric_value: value.numeric_value,
-                    source_notes: value.source_notes,
-                    added_by: value.added_by,
-                    added_at: value.added_at,
-                    last_updated_at: value.last_updated_at,
-                  });
-
-                  // Re-sort after adding
-                  allMetrics[metricCategory][existingMetricIndex].values.sort(
-                    (a, b) => a.year - b.year,
-                  );
-                }
-              }
-            });
           }
-        });
-      });
-    }
 
-    return allMetrics;
+          metric.values.forEach((value) => {
+            if (years.length === 0 || years.includes(value.year)) {
+              metrics[metric.metric_name].values.push({
+                year: value.year,
+                value: value.value,
+                numeric_value: value.numeric_value,
+                source_notes: value.source_notes,
+                added_at: value.added_at,
+              });
+            }
+          });
+        }
+      });
+    });
+
+    // Sort values by year
+    Object.keys(metrics).forEach((metricName) => {
+      metrics[metricName].values.sort((a, b) => a.year - b.year);
+    });
+
+    return metrics;
   } catch (error) {
     throw new AppError(
-      `Error fetching company metrics: ${error.message}`,
+      `Error fetching metrics: ${error.message}`,
       500,
       "METRICS_FETCH_ERROR",
     );
   }
-}
-
-/**
- * Helper function to extract specific metrics by names
- */
-async function getMetricsByNames(companyId, metricNames, years = []) {
-  const allMetrics = await getAllCompanyMetrics(companyId, years);
-
-  const result = {};
-  ["environmental", "social", "governance"].forEach((category) => {
-    allMetrics[category].forEach((metric) => {
-      if (metricNames.includes(metric.metric_name)) {
-        result[metric.metric_name] = metric;
-      }
-    });
-  });
-
-  return result;
 }
 
 /**
@@ -167,16 +88,15 @@ function getUniqueYearsFromMetrics(metrics, year = null) {
     });
   });
 
-  return Array.from(allYears).sort((a, b) => a - b);
+  return Array.from(allYears).sort();
 }
 
 /**
  * Helper function to calculate percentage change
  */
 function calculatePercentageChange(initialValue, finalValue) {
-  if (initialValue === null || initialValue === undefined || initialValue === 0)
-    return 0;
-  return ((finalValue - initialValue) / Math.abs(initialValue)) * 100;
+  if (initialValue === null || finalValue === null || initialValue === 0) return 0;
+  return ((finalValue - initialValue) / initialValue) * 100;
 }
 
 /**
@@ -185,861 +105,596 @@ function calculatePercentageChange(initialValue, finalValue) {
 function getMetricValueByYear(metric, year) {
   if (!metric || !metric.values) return null;
   const value = metric.values.find((v) => v.year === year);
-  if (!value) return null;
-
-  // Try numeric_value first, then parse from value
-  if (value.numeric_value !== null && value.numeric_value !== undefined) {
-    return value.numeric_value;
-  }
-
-  if (value.value !== null && value.value !== undefined) {
-    const parsed = parseFloat(value.value);
-    return isNaN(parsed) ? 0 : parsed;
-  }
-
-  return 0;
+  return value ? (value.numeric_value !== undefined ? value.numeric_value : parseFloat(value.value) || null) : null;
 }
 
 /**
- * Helper function to calculate trends
+ * Helper function to calculate trends based on actual data
  */
-function calculateTrend(values, years, metricName = null) {
-  if (!values || values.length < 2 || years.length < 2) return "stable";
+function calculateTrend(values, years) {
+  if (!values || values.length < 2) return "insufficient_data";
 
-  const sortedYears = [...years].sort((a, b) => a - b);
+  const validYears = years.filter(year => getMetricValueByYear(values, year) !== null);
+  if (validYears.length < 2) return "insufficient_data";
+
+  const sortedYears = [...validYears].sort((a, b) => a - b);
   const firstYear = sortedYears[0];
   const lastYear = sortedYears[sortedYears.length - 1];
 
   const firstValue = getMetricValueByYear(values, firstYear);
   const lastValue = getMetricValueByYear(values, lastYear);
 
-  if (firstValue === null || lastValue === null) return "stable";
+  if (firstValue === null || lastValue === null) return "insufficient_data";
 
   const change = calculatePercentageChange(firstValue, lastValue);
 
-  // Different thresholds based on metric type
-  if (
-    (metricName && metricName.includes("risk")) ||
-    (metricName && metricName.includes("intensity"))
-  ) {
-    // For risk/intensity metrics, lower is better
-    if (change < -10) return "improving";
-    if (change > 10) return "declining";
-  } else {
-    // For usage/efficiency metrics, higher is better
-    if (change > 10) return "improving";
-    if (change < -10) return "declining";
-  }
-
+  if (change > 5) return "improving";
+  if (change < -5) return "declining";
   return "stable";
 }
 
 /**
- * Helper to calculate NDWI-based drought risk (simulated)
+ * Calculate data completeness score based on available metrics
  */
-function calculateNDWIRisk(companyInfo, irrigationUsage, year) {
-  // Simulated NDWI calculation based on region and usage
-  const baseRisk = companyInfo.country === "Zimbabwe" ? 0.6 : 0.4;
-  const usageFactor =
-    irrigationUsage > 200 ? 0.3 : irrigationUsage > 150 ? 0.2 : 0.1;
-  const annualVariation = (year % 10) * 0.05; // Simulate annual variation
-
-  const ndwiScore = Math.min(1, baseRisk + usageFactor + annualVariation);
-
-  return {
-    score: ndwiScore.toFixed(2),
-    level: ndwiScore > 0.7 ? "High" : ndwiScore > 0.4 ? "Medium" : "Low",
-    description: `NDWI-based drought risk assessment for ${companyInfo.country}`,
-  };
+function calculateDataCompleteness(metrics, year, requiredMetrics) {
+  if (!metrics || !year) return 0;
+  
+  let availableCount = 0;
+  requiredMetrics.forEach(metricName => {
+    const metric = metrics[metricName];
+    if (metric && getMetricValueByYear(metric, year) !== null) {
+      availableCount++;
+    }
+  });
+  
+  return requiredMetrics.length > 0 ? (availableCount / requiredMetrics.length) * 100 : 0;
 }
 
 /**
- * Helper to calculate water scarcity projections
+ * Get exact totals from actual data in database
  */
-function calculateScarcityProjections(currentUsage, reuseRate, yearsAhead = 5) {
-  const baseProjection = currentUsage;
-  const climateFactor = 1.02; // 2% increase due to climate change
-  const efficiencyFactor = reuseRate > 50 ? 0.95 : reuseRate > 30 ? 0.98 : 1.02;
-
-  const projections = [];
-  for (let i = 1; i <= yearsAhead; i++) {
-    const projected =
-      baseProjection * Math.pow(climateFactor * efficiencyFactor, i);
-    projections.push({
-      year: new Date().getFullYear() + i,
-      value: projected.toFixed(1),
-      change: calculatePercentageChange(currentUsage, projected).toFixed(1),
-    });
-  }
-
-  return projections;
-}
-
-/**
- * Enhanced irrigation water risk analysis function
- */
-async function getIrrigationWaterRiskData(companyId, year = null) {
+async function getExactWaterMetrics(companyId, year = null) {
   try {
-    // Get company info with all fields
+    // Get company with full details
     const company = await Company.findById(companyId).lean();
-
     if (!company) {
       throw new AppError("Company not found", 404, "COMPANY_NOT_FOUND");
     }
 
-    // Define all relevant metric names
-    const waterMetricNames = [
+    // Define metrics based on ACTUAL data from CSV - only metrics that exist
+    const metricNames = [
+      // Water metrics that exist in CSV
       "Water Usage - Irrigation Water Usage (million ML)",
       "Water treatment (million ML)",
       "Effluent discharge for Irrigation (thousand ML)",
-      "Water Withdrawal - Total (million ML)",
-      "Water Recycling Rate (%)",
-      "Water Consumption - Process Water (million ML)",
-      "Water Consumption - Cooling Water (million ML)",
-      "Water Discharge - Total (million ML)",
-      "Water Intensity (ML/product unit)",
-    ];
-
-    const energyMetricNames = [
+      
+      // Energy metrics that exist in CSV (for water-energy nexus)
       "Energy Consumption - Electricity Purchased (MWH)",
-      "Energy Consumption - Inside Company Diesel Usage (litres)",
-      "Energy Consumption - Total (GJ)",
-      "Renewable Energy Consumption (%)",
-      "Energy Intensity (GJ/product unit)",
-    ];
-
-    const riskMetricNames = [
-      "Water Risk - Physical (score)",
-      "Water Risk - Regulatory (score)",
-      "Water Risk - Reputational (score)",
-      "Drought Exposure Index",
-      "Water Stress Level",
+      "Energy Consumption - Electricity Generated (MWH)",
+      
+      // Waste metrics (for environmental context)
+      "Waste Management - Recycled waste (excl. Boiler Ash) (tons)",
+      "Waste Management - Disposed waste (excl. Boiler Ash) (tons)",
+      
+      // Environmental incidents
+      "Environment Incidents (Sewage blockage, Stillage overflow, Illegal waste disposal, Out of spec emissions, Effluent spillage, Water loss)",
     ];
 
     // Get all metrics
-    const allMetrics = await getAllCompanyMetrics(companyId);
-    const waterMetrics = await getMetricsByNames(companyId, waterMetricNames);
-    const energyMetrics = await getMetricsByNames(companyId, energyMetricNames);
-    const riskMetrics = await getMetricsByNames(companyId, riskMetricNames);
-
-    // Combine all metrics for analysis
-    const metrics = { ...waterMetrics, ...energyMetrics, ...riskMetrics };
-
-    // Determine years for analysis
+    const metrics = await getMetricsByNames(companyId, metricNames);
     const years = getUniqueYearsFromMetrics(metrics, year);
+
     if (years.length === 0) {
-      throw new AppError(
-        "No data available for analysis",
-        404,
-        "NO_DATA_AVAILABLE",
-      );
+      throw new AppError("No water usage data available", 404, "NO_WATER_DATA");
     }
 
     const currentYear = year || Math.max(...years);
-    const previousYear =
-      years.length > 1
-        ? years[years.indexOf(currentYear) - 1] || years[0]
-        : null;
-    const threeYearAvgYears = years.slice(-3);
+    const previousYear = years.includes(currentYear - 1) ? currentYear - 1 : null;
 
-    // Extract key metric values
-    const irrigationWater =
-      metrics["Water Usage - Irrigation Water Usage (million ML)"];
-    const waterTreatment = metrics["Water treatment (million ML)"];
-    const effluentDischarge =
-      metrics["Effluent discharge for Irrigation (thousand ML)"];
-    const totalWaterWithdrawal =
-      metrics["Water Withdrawal - Total (million ML)"];
-    const waterRecyclingRate = metrics["Water Recycling Rate (%)"];
-    const electricity =
-      metrics["Energy Consumption - Electricity Purchased (MWH)"];
-    const diesel =
-      metrics["Energy Consumption - Inside Company Diesel Usage (litres)"];
-    const totalEnergy = metrics["Energy Consumption - Total (GJ)"];
-    const renewableEnergy = metrics["Renewable Energy Consumption (%)"];
-    const waterRiskPhysical = metrics["Water Risk - Physical (score)"];
-    const waterRiskRegulatory = metrics["Water Risk - Regulatory (score)"];
+    // Define required metrics based on what we ACTUALLY have
+    const requiredCoreMetrics = [
+      "Water Usage - Irrigation Water Usage (million ML)",
+      "Water treatment (million ML)",
+      "Effluent discharge for Irrigation (thousand ML)",
+    ];
 
-    // Calculate current values
-    const currentIrrigation =
-      getMetricValueByYear(irrigationWater, currentYear) || 0;
-    const currentTreatment =
-      getMetricValueByYear(waterTreatment, currentYear) || 0;
-    const currentEffluent =
-      getMetricValueByYear(effluentDischarge, currentYear) || 0;
-    const currentTotalWithdrawal =
-      getMetricValueByYear(totalWaterWithdrawal, currentYear) ||
-      currentIrrigation;
-    const currentRecyclingRate =
-      getMetricValueByYear(waterRecyclingRate, currentYear) || 0;
-    const currentElectricity =
-      getMetricValueByYear(electricity, currentYear) || 0;
-    const currentDiesel = getMetricValueByYear(diesel, currentYear) || 0;
-    const currentTotalEnergy =
-      getMetricValueByYear(totalEnergy, currentYear) ||
-      currentElectricity * 0.0036 + currentDiesel * 0.0386; // Convert to GJ
-    const currentRenewable =
-      getMetricValueByYear(renewableEnergy, currentYear) || 0;
-    const currentPhysicalRisk =
-      getMetricValueByYear(waterRiskPhysical, currentYear) || 50;
-    const currentRegulatoryRisk =
-      getMetricValueByYear(waterRiskRegulatory, currentYear) || 50;
+    // Calculate data completeness
+    const dataCompleteness = calculateDataCompleteness(metrics, currentYear, requiredCoreMetrics);
 
-    // Calculate water reuse rate
-    const calculatedReuseRate =
-      currentRecyclingRate > 0
-        ? currentRecyclingRate
-        : currentTreatment > 0
-          ? (currentEffluent / 1000 / currentTreatment) * 100
-          : 0;
-
-    // Calculate 8 KEY TOTALS
-    const keyTotals = {
-      // 1. Total Annual Water Withdrawal
-      totalWaterWithdrawal: {
-        value: currentTotalWithdrawal,
-        unit: "million ML",
-        trend: previousYear
-          ? calculateTrend(totalWaterWithdrawal, [previousYear, currentYear])
-          : "stable",
-        industryBenchmark: 150, // Example benchmark
-        performance:
-          currentTotalWithdrawal <= 150 ? "Good" : "Needs Improvement",
-      },
-
-      // 2. Irrigation Water Usage
-      irrigationWaterUsage: {
-        value: currentIrrigation,
-        unit: "million ML",
-        percentageOfTotal:
-          currentTotalWithdrawal > 0
-            ? ((currentIrrigation / currentTotalWithdrawal) * 100).toFixed(1)
-            : 0,
-        trend: previousYear
-          ? calculateTrend(irrigationWater, [previousYear, currentYear])
-          : "stable",
-      },
-
-      // 3. Water Treatment Capacity
-      waterTreatmentCapacity: {
-        value: currentTreatment,
-        unit: "million ML",
-        coverage:
-          currentTotalWithdrawal > 0
-            ? ((currentTreatment / currentTotalWithdrawal) * 100).toFixed(1) +
-              "%"
-            : "0%",
-        gap: Math.max(0, currentTotalWithdrawal - currentTreatment),
-      },
-
-      // 4. Water Reuse/Recycling
-      waterReuse: {
-        rate: calculatedReuseRate,
-        unit: "%",
-        volume: currentEffluent / 1000,
-        unitVolume: "million ML",
-        rating:
-          calculatedReuseRate > 50
-            ? "Excellent"
-            : calculatedReuseRate > 30
-              ? "Good"
-              : "Needs Improvement",
-      },
-
-      // 5. Energy for Water Management
-      waterRelatedEnergy: {
-        value: (currentElectricity * 0.3).toFixed(0), // Assume 30% for water
-        unit: "MWh",
-        percentageOfTotal: currentElectricity > 0 ? "30%" : "0%",
-        intensity:
-          currentIrrigation > 0
-            ? ((currentElectricity * 0.3) / currentIrrigation).toFixed(2)
-            : 0,
-        unitIntensity: "MWh/ML",
-      },
-
-      // 6. Water Efficiency Score
-      waterEfficiency: {
-        score: Math.min(
-          100,
-          Math.max(
-            0,
-            100 -
-              (currentIrrigation > 200
-                ? 25
-                : currentIrrigation > 150
-                  ? 12
-                  : 0) -
-              (calculatedReuseRate < 30
-                ? 20
-                : calculatedReuseRate < 50
-                  ? 10
-                  : 0) +
-              (currentTreatment / currentTotalWithdrawal > 0.8 ? 15 : 0),
-          ),
-        ),
-        rating: function () {
-          const score = this.score;
-          return score >= 85
-            ? "Excellent"
-            : score >= 70
-              ? "Good"
-              : score >= 50
-                ? "Fair"
-                : "Poor";
-        }.call({
-          score: Math.min(
-            100,
-            Math.max(
-              0,
-              100 -
-                (currentIrrigation > 200
-                  ? 25
-                  : currentIrrigation > 150
-                    ? 12
-                    : 0) -
-                (calculatedReuseRate < 30
-                  ? 20
-                  : calculatedReuseRate < 50
-                    ? 10
-                    : 0) +
-                (currentTreatment / currentTotalWithdrawal > 0.8 ? 15 : 0),
-            ),
-          ),
-        }),
-        drivers: [
-          currentIrrigation > 200 ? "High consumption" : null,
-          calculatedReuseRate < 30 ? "Low recycling" : null,
-          currentTreatment / currentTotalWithdrawal < 0.7
-            ? "Inadequate treatment"
-            : null,
-        ].filter((d) => d),
-      },
-
-      // 7. Water Risk Index
-      waterRiskIndex: {
-        score: Math.min(
-          100,
-          (currentIrrigation > 200 ? 35 : currentIrrigation > 150 ? 20 : 10) +
-            (calculatedReuseRate < 30
-              ? 30
-              : calculatedReuseRate < 50
-                ? 15
-                : 0) +
-            currentPhysicalRisk / 2 +
-            currentRegulatoryRisk / 2,
-        ),
-        level: function () {
-          const score = this.score;
-          return score > 70 ? "High" : score > 40 ? "Medium" : "Low";
-        }.call({
-          score: Math.min(
-            100,
-            (currentIrrigation > 200 ? 35 : currentIrrigation > 150 ? 20 : 10) +
-              (calculatedReuseRate < 30
-                ? 30
-                : calculatedReuseRate < 50
-                  ? 15
-                  : 0) +
-              currentPhysicalRisk / 2 +
-              currentRegulatoryRisk / 2,
-          ),
-        }),
-        components: {
-          physical: currentPhysicalRisk,
-          regulatory: currentRegulatoryRisk,
-          operational:
-            currentIrrigation > 200 ? 40 : currentIrrigation > 150 ? 25 : 10,
-        },
-      },
-
-      // 8. Cost Implications
-      costImplications: {
-        waterCost: (currentTotalWithdrawal * 1000).toFixed(0), // $1000 per million ML
-        energyCost: (currentElectricity * 0.3 * 0.12).toFixed(0), // $0.12 per kWh
-        potentialSavings: (currentTotalWithdrawal * 0.15 * 1000).toFixed(0), // 15% savings
-        unit: "$/year",
-        roiPeriod: currentIrrigation > 200 ? "2-3 years" : "3-5 years",
-      },
+    // Get exact values from database
+    const getExactValue = (metricName) => {
+      const metric = metrics[metricName];
+      if (!metric) return null;
+      const value = getMetricValueByYear(metric, currentYear);
+      return value !== null ? value : null;
     };
 
-    // Calculate NDWI-based drought risk
-    const ndwiRisk = calculateNDWIRisk(
-      {
-        country: company.country,
-        name: company.name,
+    // Extract exact values - only from metrics that exist
+    const exactValues = {
+      // Water usage (from CSV)
+      irrigationWater: getExactValue("Water Usage - Irrigation Water Usage (million ML)"),
+      waterTreatment: getExactValue("Water treatment (million ML)"),
+      effluentDischarge: getExactValue("Effluent discharge for Irrigation (thousand ML)"),
+      
+      // Energy (from CSV)
+      electricityPurchased: getExactValue("Energy Consumption - Electricity Purchased (MWH)"),
+      electricityGenerated: getExactValue("Energy Consumption - Electricity Generated (MWH)"),
+      
+      // Waste (from CSV)
+      wasteRecycled: getExactValue("Waste Management - Recycled waste (excl. Boiler Ash) (tons)"),
+      wasteDisposed: getExactValue("Waste Management - Disposed waste (excl. Boiler Ash) (tons)"),
+      
+      // Environmental incidents (from CSV)
+      environmentIncidents: getExactValue("Environment Incidents (Sewage blockage, Stillage overflow, Illegal waste disposal, Out of spec emissions, Effluent spillage, Water loss)"),
+    };
+
+    // Calculate only necessary derived metrics that can be calculated from actual data
+    const derivedMetrics = {};
+    
+    // Water reuse rate - from CSV data (Effluent discharge / Water treatment)
+    if (exactValues.waterTreatment && exactValues.waterTreatment > 0 && exactValues.effluentDischarge) {
+      derivedMetrics.waterReuseRate = ((exactValues.effluentDischarge / 1000 / exactValues.waterTreatment) * 100).toFixed(1);
+    }
+    
+    // Water-energy intensity - using irrigation water and purchased electricity
+    if (exactValues.irrigationWater && exactValues.irrigationWater > 0 && exactValues.electricityPurchased) {
+      derivedMetrics.waterEnergyIntensity = (exactValues.electricityPurchased / exactValues.irrigationWater).toFixed(2);
+    }
+    
+    // Waste recycling rate
+    if (exactValues.wasteRecycled && exactValues.wasteDisposed) {
+      const totalWaste = exactValues.wasteRecycled + exactValues.wasteDisposed;
+      if (totalWaste > 0) {
+        derivedMetrics.wasteRecyclingRate = ((exactValues.wasteRecycled / totalWaste) * 100).toFixed(1);
+      }
+    }
+    
+    // Water usage trend calculation
+    if (exactValues.irrigationWater && previousYear && metrics["Water Usage - Irrigation Water Usage (million ML)"]) {
+      const previousWater = getMetricValueByYear(
+        metrics["Water Usage - Irrigation Water Usage (million ML)"], 
+        previousYear
+      );
+      if (previousWater !== null) {
+        derivedMetrics.waterUsageChange = calculatePercentageChange(previousWater, exactValues.irrigationWater).toFixed(1);
+      }
+    }
+
+    // Generate graphs from actual data
+    const graphs = generateGraphsFromActualData(metrics, years, currentYear);
+
+    // Prepare exact response data
+    const responseData = {
+      apiInfo: {
+        version: API_VERSION,
+        calculationVersion: CALCULATION_VERSION,
+        timestamp: new Date().toISOString(),
+        dataCompleteness: `${dataCompleteness.toFixed(1)}%`,
+        dataConfidence: dataCompleteness >= 80 ? "High" : 
+                       dataCompleteness >= 60 ? "Medium" : "Low",
       },
-      currentIrrigation,
-      currentYear,
-    );
-
-    // Calculate scarcity projections
-    const scarcityProjections = calculateScarcityProjections(
-      currentIrrigation,
-      keyTotals.waterReuse.rate,
-      5,
-    );
-
-    // Prepare comprehensive response
-    const data = {
-      // Company Information
       company: {
         id: company._id,
         name: company.name,
-        registrationNumber: company.registrationNumber,
-        email: company.email,
-        phone: company.phone,
-        address: company.address,
-        website: company.website,
-        country: company.country,
         industry: company.industry,
-        description: company.description,
-        purpose: company.purpose,
-        scope: company.scope,
-        data_source: company.data_source,
-        area_of_interest_metadata: company.area_of_interest_metadata,
-        data_range: company.data_range,
-        data_processing_workflow: company.data_processing_workflow,
-        analytical_layer_metadata: company.analytical_layer_metadata,
-        esg_reporting_framework: company.esg_reporting_framework,
-        esg_contact_person: company.esg_contact_person,
-        latest_esg_report_year: company.latest_esg_report_year,
-        esg_data_status: company.esg_data_status,
-        has_esg_linked_pay: company.has_esg_linked_pay,
-        created_at: company.created_at,
-        updated_at: company.updated_at,
+        country: company.country,
+        areaOfInterest: company.area_of_interest_metadata || {},
+        esgFrameworks: company.esg_reporting_framework || [],
       },
-
-      // Analysis Period
-      analysisPeriod: {
+      year: currentYear,
+      period: {
         currentYear,
         previousYear,
         availableYears: years,
-        dataRange: `${Math.min(...years)}-${Math.max(...years)}`,
       },
-
-      // 8 KEY TOTALS
-      keyTotals,
-
-      // Detailed Metrics (All available)
-      metrics: {
-        water: waterMetrics,
-        energy: energyMetrics,
-        risk: riskMetrics,
-        all: allMetrics, // Includes all categories
+      dataQuality: {
+        completenessScore: dataCompleteness.toFixed(1),
+        confidenceLevel: dataCompleteness >= 80 ? "High" : 
+                        dataCompleteness >= 60 ? "Medium" : "Low",
+        missingMetrics: requiredCoreMetrics.filter(metricName => 
+          !metrics[metricName] || getMetricValueByYear(metrics[metricName], currentYear) === null
+        ),
+        availableMetrics: Object.keys(metrics).filter(metricName => 
+          getMetricValueByYear(metrics[metricName], currentYear) !== null
+        ),
       },
-
-      // Risk Assessment
-      riskAssessment: {
-        droughtRisk: ndwiRisk,
-        scarcityRisk: {
-          level:
-            currentIrrigation > 180
-              ? "High"
-              : currentIrrigation > 120
-                ? "Medium"
-                : "Low",
-          score:
-            currentIrrigation > 180 ? 80 : currentIrrigation > 120 ? 50 : 20,
-          factors: [
-            currentIrrigation > 180
-              ? "Exceeds sustainable withdrawal limits"
-              : null,
-            company.country === "Zimbabwe"
-              ? "Region experiences periodic droughts"
-              : null,
-            keyTotals.waterReuse.rate < 30
-              ? "Low resilience through recycling"
-              : null,
-          ].filter((f) => f),
+      exactMetrics: {
+        // Raw metric values from database
+        rawValues: exactValues,
+        
+        // Calculated metrics (only what can be calculated from actual data)
+        calculated: derivedMetrics,
+        
+        // Trend analysis based on actual data
+        trends: {
+          irrigationWater: metrics["Water Usage - Irrigation Water Usage (million ML)"] ? 
+            calculateTrend(metrics["Water Usage - Irrigation Water Usage (million ML)"], years) : "insufficient_data",
+          waterTreatment: metrics["Water treatment (million ML)"] ? 
+            calculateTrend(metrics["Water treatment (million ML)"], years) : "insufficient_data",
+          effluentDischarge: metrics["Effluent discharge for Irrigation (thousand ML)"] ? 
+            calculateTrend(metrics["Effluent discharge for Irrigation (thousand ML)"], years) : "insufficient_data",
         },
-        qualityRisk: {
-          level:
-            keyTotals.waterReuse.rate < 20
-              ? "High"
-              : keyTotals.waterReuse.rate < 40
-                ? "Medium"
-                : "Low",
-          score:
-            keyTotals.waterReuse.rate < 20
-              ? 75
-              : keyTotals.waterReuse.rate < 40
-                ? 45
-                : 15,
-          treatmentCoverage: keyTotals.waterTreatmentCapacity.coverage,
-        },
-        regulatoryRisk: {
-          level: company.country === "Zimbabwe" ? "Medium" : "Low",
-          score: company.country === "Zimbabwe" ? 60 : 30,
-          complianceStatus: "Compliant",
-          upcomingRegulations: [
-            "Water Efficiency Standards 2026",
-            "Discharge Quality Limits",
-          ],
-        },
-        financialRisk: {
-          annualCost:
-            parseFloat(keyTotals.costImplications.waterCost) +
-            parseFloat(keyTotals.costImplications.energyCost) +
-            " $",
-          exposure: (currentIrrigation * 100).toFixed(0) + " $/ML shortage",
-          insurancePremium: (currentIrrigation * 50).toFixed(0) + " $/year",
-        },
+        
+        // Year-over-year changes (if previous year exists)
+        yearOverYear: previousYear ? {
+          irrigationWaterChange: metrics["Water Usage - Irrigation Water Usage (million ML)"] ? 
+            calculatePercentageChange(
+              getMetricValueByYear(metrics["Water Usage - Irrigation Water Usage (million ML)"], previousYear),
+              exactValues.irrigationWater
+            ).toFixed(1) + "%" : "insufficient_data",
+          waterTreatmentChange: metrics["Water treatment (million ML)"] ? 
+            calculatePercentageChange(
+              getMetricValueByYear(metrics["Water treatment (million ML)"], previousYear),
+              exactValues.waterTreatment
+            ).toFixed(1) + "%" : "insufficient_data",
+          effluentDischargeChange: metrics["Effluent discharge for Irrigation (thousand ML)"] ? 
+            calculatePercentageChange(
+              getMetricValueByYear(metrics["Effluent discharge for Irrigation (thousand ML)"], previousYear),
+              exactValues.effluentDischarge
+            ).toFixed(1) + "%" : "insufficient_data",
+        } : null,
       },
-
-      // Projections and Forecasts
-      projections: {
-        scarcity: scarcityProjections,
-        efficiencyGains: [
-          {
-            year: currentYear + 1,
-            potentialSavings: "15%",
-            investment: "200,000 $",
-          },
-          {
-            year: currentYear + 2,
-            potentialSavings: "25%",
-            investment: "150,000 $",
-          },
-          {
-            year: currentYear + 3,
-            potentialSavings: "35%",
-            investment: "100,000 $",
-          },
-        ],
-        climateImpact: {
-          rainfallVariability: "±20% predicted",
-          temperatureIncrease: "+1.5°C by 2030",
-          evaporationLoss: "Increase by 15%",
+      graphs: graphs,
+      
+      // Statistical summary (based on actual data)
+      statisticalSummary: years.length > 1 ? {
+        irrigationWater: {
+          min: getMinValue(metrics["Water Usage - Irrigation Water Usage (million ML)"], years),
+          max: getMaxValue(metrics["Water Usage - Irrigation Water Usage (million ML)"], years),
+          average: getAverageValue(metrics["Water Usage - Irrigation Water Usage (million ML)"], years),
+          standardDeviation: getStandardDeviation(metrics["Water Usage - Irrigation Water Usage (million ML)"], years),
         },
+        waterTreatment: metrics["Water treatment (million ML)"] ? {
+          min: getMinValue(metrics["Water treatment (million ML)"], years),
+          max: getMaxValue(metrics["Water treatment (million ML)"], years),
+          average: getAverageValue(metrics["Water treatment (million ML)"], years),
+        } : null,
+        effluentDischarge: metrics["Effluent discharge for Irrigation (thousand ML)"] ? {
+          min: getMinValue(metrics["Effluent discharge for Irrigation (thousand ML)"], years),
+          max: getMaxValue(metrics["Effluent discharge for Irrigation (thousand ML)"], years),
+          average: getAverageValue(metrics["Effluent discharge for Irrigation (thousand ML)"], years),
+        } : null,
+      } : null,
+      
+      // Environmental context (from available waste and incident data)
+      environmentalContext: {
+        wasteManagement: exactValues.wasteRecycled !== null || exactValues.wasteDisposed !== null ? {
+          recycled: exactValues.wasteRecycled,
+          disposed: exactValues.wasteDisposed,
+          recyclingRate: derivedMetrics.wasteRecyclingRate ? derivedMetrics.wasteRecyclingRate + "%" : "insufficient_data",
+        } : null,
+        incidents: exactValues.environmentIncidents !== null ? {
+          count: exactValues.environmentIncidents,
+          type: "Sewage blockage, Stillage overflow, Illegal waste disposal, Out of spec emissions, Effluent spillage, Water loss",
+        } : null,
       },
-
-      // GRAPHS (Enhanced with more visualizations)
-      graphs: {
-        // 1. Water Usage Trend (Multi-year)
-        waterUsageTrend: {
-          type: "line",
-          title: "Water Usage Trend (5-Year History)",
-          labels: years.slice(-5),
-          datasets: [
-            {
-              label: "Total Withdrawal",
-              data: years
-                .slice(-5)
-                .map((y) => getMetricValueByYear(totalWaterWithdrawal, y) || 0),
-              borderColor: "#3498db",
-              backgroundColor: "rgba(52, 152, 219, 0.1)",
-              borderWidth: 3,
-            },
-            {
-              label: "Irrigation Water",
-              data: years
-                .slice(-5)
-                .map((y) => getMetricValueByYear(irrigationWater, y) || 0),
-              borderColor: "#2ecc71",
-              backgroundColor: "rgba(46, 204, 113, 0.1)",
-              borderWidth: 2,
-              borderDash: [5, 5],
-            },
-          ],
+      
+      // Source information
+      sourceInformation: {
+        primarySource: "HVE Integrated Report 2025",
+        pages: {
+          waterMetrics: "p.27-28",
+          energyMetrics: "p.27",
+          wasteMetrics: "p.29-30",
         },
-
-        // 2. Water Balance Pie Chart
-        waterBalance: {
-          type: "doughnut",
-          title: "Water Balance Analysis",
-          labels: [
-            "Irrigation Use",
-            "Treated Water",
-            "Reused Water",
-            "Other Uses",
-            "Losses",
-          ],
-          datasets: [
-            {
-              data: [
-                currentIrrigation,
-                currentTreatment,
-                currentEffluent / 1000,
-                Math.max(
-                  0,
-                  currentTotalWithdrawal - currentIrrigation - currentTreatment,
-                ),
-                Math.max(
-                  0,
-                  currentTotalWithdrawal -
-                    currentTreatment -
-                    currentEffluent / 1000,
-                ),
-              ],
-              backgroundColor: [
-                "#3498db",
-                "#2ecc71",
-                "#9b59b6",
-                "#f39c12",
-                "#e74c3c",
-              ],
-            },
-          ],
-        },
-
-        // 3. Water-Energy Nexus
-        waterEnergyNexus: {
-          type: "bar",
-          title: "Water-Energy Nexus Analysis",
-          labels: years.slice(-3),
-          datasets: [
-            {
-              label: "Water Usage (million ML)",
-              data: years
-                .slice(-3)
-                .map((y) => getMetricValueByYear(irrigationWater, y) || 0),
-              backgroundColor: "#3498db",
-              yAxisID: "y",
-            },
-            {
-              label: "Energy for Water (GJ)",
-              data: years
-                .slice(-3)
-                .map((y) => (getMetricValueByYear(totalEnergy, y) || 0) * 0.3),
-              backgroundColor: "#f39c12",
-              yAxisID: "y1",
-            },
-          ],
-          options: {
-            scales: {
-              y: {
-                type: "linear",
-                position: "left",
-                title: { display: true, text: "Water (million ML)" },
-              },
-              y1: {
-                type: "linear",
-                position: "right",
-                title: { display: true, text: "Energy (GJ)" },
-              },
-            },
-          },
-        },
-
-        // 4. Efficiency vs Risk Correlation
-        efficiencyRiskCorrelation: {
-          type: "scatter",
-          title: "Efficiency vs Risk Correlation",
-          datasets: years.slice(-5).map((y) => ({
-            label: y.toString(),
-            data: [
-              {
-                x: getMetricValueByYear(irrigationWater, y) || 0,
-                y: (getMetricValueByYear(electricity, y) || 0) * 0.3,
-                r: y === currentYear ? 15 : 10,
-              },
-            ],
-            backgroundColor: y === currentYear ? "#e74c3c" : "#3498db",
-          })),
-        },
-
-        // 5. Water Recycling Trend
-        recyclingTrend: {
-          type: "line",
-          title: "Water Recycling Rate Trend",
-          labels: years.slice(-5),
-          datasets: [
-            {
-              label: "Recycling Rate (%)",
-              data: years.slice(-5).map((y) => {
-                const recyclingValue = getMetricValueByYear(
-                  waterRecyclingRate,
-                  y,
-                );
-                if (recyclingValue) return recyclingValue;
-
-                const effluent =
-                  getMetricValueByYear(effluentDischarge, y) || 0;
-                const treatment = getMetricValueByYear(waterTreatment, y) || 1;
-                return (effluent / 1000 / treatment) * 100;
-              }),
-              borderColor: "#9b59b6",
-              backgroundColor: "rgba(155, 89, 182, 0.1)",
-              fill: true,
-              tension: 0.4,
-            },
-          ],
-        },
-
-        // 6. Risk Components Radar Chart
-        riskRadar: {
-          type: "radar",
-          title: "Water Risk Components",
-          labels: [
-            "Scarcity",
-            "Quality",
-            "Regulatory",
-            "Operational",
-            "Financial",
-            "Reputational",
-          ],
-          datasets: [
-            {
-              label: "Current Risk Score",
-              data: [
-                currentIrrigation > 180
-                  ? 80
-                  : currentIrrigation > 120
-                    ? 50
-                    : 20,
-                keyTotals.waterReuse.rate < 20
-                  ? 75
-                  : keyTotals.waterReuse.rate < 40
-                    ? 45
-                    : 15,
-                currentRegulatoryRisk,
-                60,
-                parseFloat(keyTotals.costImplications.waterCost) > 1000000
-                  ? 70
-                  : 40,
-                30,
-              ],
-              backgroundColor: "rgba(231, 76, 60, 0.2)",
-              borderColor: "#e74c3c",
-            },
-            {
-              label: "Industry Average",
-              data: [40, 50, 45, 55, 35, 25],
-              backgroundColor: "rgba(52, 152, 219, 0.2)",
-              borderColor: "#3498db",
-              borderDash: [5, 5],
-            },
-          ],
-        },
-
-        // 7. Projection Forecast
-        scarcityProjection: {
-          type: "line",
-          title: "Water Scarcity Projection (Next 5 Years)",
-          labels: scarcityProjections.map((p) => p.year.toString()),
-          datasets: [
-            {
-              label: "Projected Water Need",
-              data: scarcityProjections.map((p) => parseFloat(p.value)),
-              borderColor: "#e74c3c",
-              backgroundColor: "rgba(231, 76, 60, 0.1)",
-              borderWidth: 2,
-              fill: true,
-            },
-            {
-              label: "Current Usage",
-              data: scarcityProjections.map(() => currentIrrigation),
-              borderColor: "#3498db",
-              backgroundColor: "transparent",
-              borderWidth: 1,
-              borderDash: [5, 5],
-            },
-          ],
-        },
-
-        // 8. Cost Breakdown
-        costBreakdown: {
-          type: "bar",
-          title: "Annual Water Management Cost Breakdown",
-          labels: [
-            "Water Procurement",
-            "Energy for Water",
-            "Treatment",
-            "Compliance",
-            "Risk Insurance",
-          ],
-          datasets: [
-            {
-              label: "Cost ($)",
-              data: [
-                parseFloat(keyTotals.costImplications.waterCost),
-                parseFloat(keyTotals.costImplications.energyCost),
-                parseFloat(keyTotals.costImplications.waterCost) * 0.2,
-                parseFloat(keyTotals.costImplications.waterCost) * 0.1,
-                parseFloat(keyTotals.costImplications.waterCost) * 0.05,
-              ],
-              backgroundColor: [
-                "#3498db",
-                "#f39c12",
-                "#2ecc71",
-                "#9b59b6",
-                "#e74c3c",
-              ],
-            },
-          ],
-        },
-      },
-
-      // Recommendations (Prioritized)
-      recommendations: {
-        highPriority: [
-          currentIrrigation > 180
-            ? "Implement precision irrigation (drip/sprinkler) systems"
-            : null,
-          keyTotals.waterReuse.rate < 30
-            ? "Install water recycling and reuse infrastructure"
-            : null,
-          keyTotals.waterTreatmentCapacity.coverage.includes("0%")
-            ? "Expand water treatment capacity"
-            : null,
-        ].filter((r) => r),
-
-        mediumPriority: [
-          keyTotals.waterRelatedEnergy.intensity > 80
-            ? "Optimize pump efficiency and scheduling"
-            : null,
-          "Implement soil moisture monitoring for optimal irrigation",
-          "Develop drought contingency plan",
-        ].filter((r) => r),
-
-        longTerm: [
-          "Invest in rainwater harvesting systems",
-          "Explore wastewater-to-energy opportunities",
-          "Participate in water stewardship initiatives",
-        ],
-      },
-
-      // Compliance and Reporting
-      compliance: {
-        frameworks: company.esg_reporting_framework || [],
-        reportingStatus: company.esg_data_status || "not_collected",
-        nextReportDue: currentYear + 1,
-        keyMetricsDisclosed:
-          Object.keys(waterMetrics).length + " water metrics",
-        gaps:
-          Object.keys(waterMetrics).length < 5
-            ? "Insufficient water metrics disclosure"
-            : "Adequate disclosure",
-      },
-
-      // Metadata
-      metadata: {
-        dataQuality: allMetrics.companyInfo.dataQualityScore || "Not assessed",
-        verificationStatus:
-          allMetrics.companyInfo.verificationStatus || "unverified",
-        lastUpdated: new Date().toISOString(),
-        analysisMethodology: "NDWI-based drought risk + Water balance analysis",
+        dataAccuracy: "Reported figures from company integrated report",
       },
     };
 
-    return data;
+    return responseData;
   } catch (error) {
     if (error instanceof AppError) {
       throw error;
     }
     throw new AppError(
-      "Failed to retrieve irrigation efficiency data",
+      "Failed to retrieve water metrics data",
       500,
-      "IRRIGATION_API_ERROR",
-      {
-        details: error.message,
-        stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
-      },
+      "WATER_METRICS_ERROR",
+      { details: error.message },
     );
   }
 }
 
+/**
+ * Helper functions for statistical calculations
+ */
+function getMinValue(metric, years) {
+  if (!metric) return null;
+  const values = years
+    .map(year => getMetricValueByYear(metric, year))
+    .filter(value => value !== null);
+  return values.length > 0 ? Math.min(...values) : null;
+}
+
+function getMaxValue(metric, years) {
+  if (!metric) return null;
+  const values = years
+    .map(year => getMetricValueByYear(metric, year))
+    .filter(value => value !== null);
+  return values.length > 0 ? Math.max(...values) : null;
+}
+
+function getAverageValue(metric, years) {
+  if (!metric) return null;
+  const values = years
+    .map(year => getMetricValueByYear(metric, year))
+    .filter(value => value !== null);
+  return values.length > 0 ? 
+    (values.reduce((sum, val) => sum + val, 0) / values.length).toFixed(2) : null;
+}
+
+function getStandardDeviation(metric, years) {
+  if (!metric) return null;
+  const values = years
+    .map(year => getMetricValueByYear(metric, year))
+    .filter(value => value !== null);
+  
+  if (values.length < 2) return null;
+  
+  const mean = values.reduce((sum, val) => sum + val, 0) / values.length;
+  const squareDiffs = values.map(value => Math.pow(value - mean, 2));
+  const avgSquareDiff = squareDiffs.reduce((sum, val) => sum + val, 0) / squareDiffs.length;
+  return Math.sqrt(avgSquareDiff).toFixed(2);
+}
+
+/**
+ * Generate graphs from actual data that exists
+ */
+function generateGraphsFromActualData(metrics, years, currentYear) {
+  const graphs = {};
+  
+  // Graph 1: Water Usage Trend (Line)
+  const irrigationWater = metrics["Water Usage - Irrigation Water Usage (million ML)"];
+  
+  if (irrigationWater) {
+    const waterData = years.map(y => getMetricValueByYear(irrigationWater, y));
+    if (waterData.some(v => v !== null)) {
+      graphs.waterUsageTrend = {
+        type: "line",
+        title: "Irrigation Water Usage Trend",
+        description: "Historical trend of irrigation water usage (million ML)",
+        labels: years,
+        datasets: [
+          {
+            label: "Irrigation Water (million ML)",
+            data: waterData,
+            borderColor: "#3498db",
+            backgroundColor: "rgba(52, 152, 219, 0.1)",
+            tension: 0.4,
+            fill: true,
+          },
+        ],
+      };
+    }
+  }
+  
+  // Graph 2: Water Treatment and Effluent Discharge (Dual Axis)
+  const waterTreatment = metrics["Water treatment (million ML)"];
+  const effluentDischarge = metrics["Effluent discharge for Irrigation (thousand ML)"];
+  
+  if (waterTreatment || effluentDischarge) {
+    const treatmentData = waterTreatment ? years.map(y => getMetricValueByYear(waterTreatment, y)) : null;
+    const effluentData = effluentDischarge ? years.map(y => getMetricValueByYear(effluentDischarge, y)) : null;
+    
+    if ((treatmentData && treatmentData.some(v => v !== null)) || 
+        (effluentData && effluentData.some(v => v !== null))) {
+      graphs.waterTreatmentEffluent = {
+        type: "bar",
+        title: "Water Treatment and Effluent Discharge",
+        description: "Water treatment capacity vs effluent discharge for irrigation",
+        labels: years,
+        datasets: [
+          waterTreatment && {
+            label: "Water Treated (million ML)",
+            data: treatmentData,
+            backgroundColor: "#2ecc71",
+            yAxisID: "y",
+            type: "bar",
+          },
+          effluentDischarge && {
+            label: "Effluent Discharge (thousand ML)",
+            data: effluentData,
+            backgroundColor: "#e74c3c",
+            yAxisID: "y1",
+            type: "line",
+            tension: 0.4,
+          },
+        ].filter(dataset => dataset !== null),
+        options: {
+          scales: {
+            y: {
+              type: "linear",
+              position: "left",
+              title: { display: true, text: "Water Treated (million ML)" },
+            },
+            y1: {
+              type: "linear",
+              position: "right",
+              title: { display: true, text: "Effluent Discharge (thousand ML)" },
+              grid: { drawOnChartArea: false },
+            },
+          },
+        },
+      };
+    }
+  }
+  
+  // Graph 3: Water-Energy Nexus
+  const electricityPurchased = metrics["Energy Consumption - Electricity Purchased (MWH)"];
+  
+  if (irrigationWater && electricityPurchased) {
+    const waterData = years.map(y => getMetricValueByYear(irrigationWater, y));
+    const energyData = years.map(y => getMetricValueByYear(electricityPurchased, y));
+    
+    if (waterData.some(v => v !== null) && energyData.some(v => v !== null)) {
+      graphs.waterEnergyNexus = {
+        type: "line",
+        title: "Water-Energy Nexus",
+        description: "Relationship between water usage and electricity consumption",
+        labels: years,
+        datasets: [
+          {
+            label: "Irrigation Water (million ML)",
+            data: waterData,
+            borderColor: "#3498db",
+            backgroundColor: "rgba(52, 152, 219, 0.1)",
+            yAxisID: "y",
+            fill: true,
+          },
+          {
+            label: "Electricity Purchased (MWh)",
+            data: energyData,
+            borderColor: "#f39c12",
+            backgroundColor: "rgba(243, 156, 18, 0.1)",
+            yAxisID: "y1",
+          },
+        ],
+        options: {
+          scales: {
+            y: {
+              type: "linear",
+              position: "left",
+              title: { display: true, text: "Water (million ML)" },
+            },
+            y1: {
+              type: "linear",
+              position: "right",
+              title: { display: true, text: "Electricity (MWh)" },
+              grid: { drawOnChartArea: false },
+            },
+          },
+        },
+      };
+    }
+  }
+  
+  // Graph 4: Water Reuse Rate Over Time
+  if (waterTreatment && effluentDischarge) {
+    const reuseRates = years.map(year => {
+      const treatment = getMetricValueByYear(waterTreatment, year);
+      const effluent = getMetricValueByYear(effluentDischarge, year);
+      if (treatment && treatment > 0 && effluent) {
+        return (effluent / 1000 / treatment) * 100;
+      }
+      return null;
+    });
+    
+    if (reuseRates.some(v => v !== null)) {
+      graphs.waterReuseTrend = {
+        type: "line",
+        title: "Water Reuse Rate Trend",
+        description: "Percentage of treated water reused for irrigation",
+        labels: years,
+        datasets: [
+          {
+            label: "Water Reuse Rate (%)",
+            data: reuseRates,
+            borderColor: "#9b59b6",
+            backgroundColor: "rgba(155, 89, 182, 0.1)",
+            fill: true,
+            tension: 0.4,
+          },
+        ],
+      };
+    }
+  }
+  
+  // Graph 5: Waste Management (Stacked Bar)
+  const wasteRecycled = metrics["Waste Management - Recycled waste (excl. Boiler Ash) (tons)"];
+  const wasteDisposed = metrics["Waste Management - Disposed waste (excl. Boiler Ash) (tons)"];
+  
+  if (wasteRecycled || wasteDisposed) {
+    const recycledData = wasteRecycled ? years.map(y => getMetricValueByYear(wasteRecycled, y)) : null;
+    const disposedData = wasteDisposed ? years.map(y => getMetricValueByYear(wasteDisposed, y)) : null;
+    
+    if ((recycledData && recycledData.some(v => v !== null)) || 
+        (disposedData && disposedData.some(v => v !== null))) {
+      graphs.wasteManagement = {
+        type: "bar",
+        title: "Waste Management",
+        description: "Recycled vs disposed waste over time",
+        labels: years,
+        datasets: [
+          wasteRecycled && {
+            label: "Recycled Waste (tons)",
+            data: recycledData,
+            backgroundColor: "#2ecc71",
+            stack: "stack1",
+          },
+          wasteDisposed && {
+            label: "Disposed Waste (tons)",
+            data: disposedData,
+            backgroundColor: "#e74c3c",
+            stack: "stack1",
+          },
+        ].filter(dataset => dataset !== null),
+      };
+    }
+  }
+  
+  // Graph 6: Environmental Incidents
+  const environmentIncidents = metrics["Environment Incidents (Sewage blockage, Stillage overflow, Illegal waste disposal, Out of spec emissions, Effluent spillage, Water loss)"];
+  
+  if (environmentIncidents) {
+    const incidentData = years.map(y => getMetricValueByYear(environmentIncidents, y));
+    if (incidentData.some(v => v !== null)) {
+      graphs.environmentalIncidents = {
+        type: "bar",
+        title: "Environmental Incidents",
+        description: "Number of environmental incidents per year",
+        labels: years,
+        datasets: [
+          {
+            label: "Incidents (count)",
+            data: incidentData,
+            backgroundColor: years.map(year => 
+              year === currentYear ? "#e74c3c" : "#f39c12"
+            ),
+          },
+        ],
+      };
+    }
+  }
+  
+  // Graph 7: Comparative Analysis - Current vs Previous Year (if available)
+  if (years.length >= 2 && irrigationWater && waterTreatment && effluentDischarge) {
+    const currentYear = Math.max(...years);
+    const previousYear = years[years.indexOf(currentYear) - 1];
+    
+    if (previousYear) {
+      const currentWater = getMetricValueByYear(irrigationWater, currentYear);
+      const previousWater = getMetricValueByYear(irrigationWater, previousYear);
+      const currentTreatment = getMetricValueByYear(waterTreatment, currentYear);
+      const previousTreatment = getMetricValueByYear(waterTreatment, previousYear);
+      const currentEffluent = getMetricValueByYear(effluentDischarge, currentYear);
+      const previousEffluent = getMetricValueByYear(effluentDischarge, previousYear);
+      
+      if (currentWater !== null && previousWater !== null) {
+        graphs.yearComparison = {
+          type: "bar",
+          title: "Year-over-Year Comparison",
+          description: `Comparison of key metrics between ${previousYear} and ${currentYear}`,
+          labels: ["Irrigation Water", "Water Treatment", "Effluent Discharge"],
+          datasets: [
+            {
+              label: previousYear.toString(),
+              data: [previousWater, previousTreatment, previousEffluent ? previousEffluent/1000 : null],
+              backgroundColor: "rgba(52, 152, 219, 0.7)",
+            },
+            {
+              label: currentYear.toString(),
+              data: [currentWater, currentTreatment, currentEffluent ? currentEffluent/1000 : null],
+              backgroundColor: "rgba(46, 204, 113, 0.7)",
+            },
+          ],
+        };
+      }
+    }
+  }
+  
+  return graphs;
+}
+
 module.exports = {
-  getIrrigationWaterRiskData,
+  getIrrigationWaterRiskData: getExactWaterMetrics,
 };
