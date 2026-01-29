@@ -169,14 +169,14 @@ const CarbonEmissionAccountingSchema = new Schema({
     methodology_statement: { type: String, trim: true }, // First paragraph about methodology
     emission_factors: [EmissionReferenceSchema],
     global_warming_potentials: {
-      n2o_gwp: { type: Number, default: 298 }, // IPCC AR5
-      ch4_gwp: { type: Number, default: 28 }, // IPCC AR5
-      source: { type: String, default: "IPCC AR5" },
+      n2o_gwp: { type: Number, default: 0 }, // IPCC AR5
+      ch4_gwp: { type: Number}, // IPCC AR5
+      source: { type: String },
     },
     conversion_factors: {
-      n2o_n_to_n2o: { type: Number, default: 44 / 28 },
-      carbon_to_co2: { type: Number, default: 44 / 12 },
-      carbon_fraction: { type: Number, default: 0.47 },
+      n2o_n_to_n2o: { type: Number, default: 0},
+      carbon_to_co2: { type: Number, default: 0 },
+      carbon_fraction: { type: Number, default: 0 },
     },
   },
   // Yearly Carbon Data

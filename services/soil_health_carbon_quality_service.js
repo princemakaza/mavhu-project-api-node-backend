@@ -1025,8 +1025,12 @@ function monitorSoilDegradation(carbonData, esgMetrics, currentYear) {
 /**
  * Helper function to generate comprehensive graphs (5 key graphs)
  */
+/**
+ * Helper function to generate comprehensive graphs (5 key graphs)
+ */
 function generateKeyGraphs(
-  carbonData,
+  allCarbonData, // Always pass all years data here
+  carbonDataForYear, // Year-filtered data for other graphs
   esgMetrics,
   soilHealthIndicators,
   currentYear,
@@ -1034,9 +1038,9 @@ function generateKeyGraphs(
 ) {
   const allGraphs = {};
 
-  // 1. SOC Trend over time (Soil Health)
-  if (carbonData?.yearly_data?.length > 0) {
-    const socYears = carbonData.yearly_data
+  // 1. SOC Trend over time (Soil Health) - ALWAYS use all years data for trend
+  if (allCarbonData?.yearly_data?.length > 0) {
+    const socYears = allCarbonData.yearly_data
       .filter((d) => d.calculated_soc?.average_tc_per_ha)
       .map((d) => d.year);
 
@@ -1050,8 +1054,9 @@ function generateKeyGraphs(
         datasets: [
           {
             label: "Average SOC (tC/ha)",
-            data: carbonData.yearly_data
+            data: allCarbonData.yearly_data
               .filter((d) => d.calculated_soc?.average_tc_per_ha)
+              .sort((a, b) => a.year - b.year) // Ensure chronological order
               .map((d) => d.calculated_soc.average_tc_per_ha),
             borderColor: "#27ae60",
             backgroundColor: "rgba(39, 174, 96, 0.1)",
@@ -1061,19 +1066,27 @@ function generateKeyGraphs(
         ],
         interpretation:
           "Higher SOC indicates better soil health and carbon storage capacity",
+        data_period: `${socYears[0]} - ${socYears[socYears.length - 1]}`,
+        note: "Shows multi-year trend regardless of selected year",
       };
     }
   }
 
-  // 2. Carbon Balance (Sequestration vs Emissions)
-  if (carbonData?.yearly_data?.length > 0) {
-    const balanceYears = carbonData.yearly_data.map((d) => d.year);
-    const sequestrationData = carbonData.yearly_data.map(
-      (d) => d.sequestration?.annual_summary?.sequestration_total_tco2 || 0,
-    );
-    const emissionData = carbonData.yearly_data.map(
-      (d) => d.emissions?.total_scope_emission_tco2e || 0,
-    );
+  // 2. Carbon Balance (Sequestration vs Emissions) - Use all years data
+  if (allCarbonData?.yearly_data?.length > 0) {
+    const balanceYears = allCarbonData.yearly_data
+      .sort((a, b) => a.year - b.year)
+      .map((d) => d.year);
+
+    const sequestrationData = allCarbonData.yearly_data
+      .sort((a, b) => a.year - b.year)
+      .map(
+        (d) => d.sequestration?.annual_summary?.sequestration_total_tco2 || 0,
+      );
+
+    const emissionData = allCarbonData.yearly_data
+      .sort((a, b) => a.year - b.year)
+      .map((d) => d.emissions?.total_scope_emission_tco2e || 0);
 
     if (
       sequestrationData.some((v) => v > 0) ||
@@ -1105,7 +1118,7 @@ function generateKeyGraphs(
     }
   }
 
-  // 3. GHG Emissions Breakdown by Scope
+  // 3. GHG Emissions Breakdown by Scope - Use current year data
   const scope1Data = esgMetrics.environmental?.["GHG Scope 1 (tCO2e)"];
   const scope2Data = esgMetrics.environmental?.["GHG Scope 2 (tCO2e)"];
   const scope3Data = esgMetrics.environmental?.["GHG Scope 3 (tCO2e)"];
@@ -1139,9 +1152,9 @@ function generateKeyGraphs(
     }
   }
 
-  // 4. Monthly SOC Variation (Current Year)
-  if (carbonData && currentYear) {
-    const currentYearData = carbonData.yearly_data?.find(
+  // 4. Monthly SOC Variation - Use year-filtered data
+  if (carbonDataForYear) {
+    const currentYearData = carbonDataForYear.yearly_data?.find(
       (y) => y.year === currentYear,
     );
     if (currentYearData?.sequestration?.monthly_data?.length > 0) {
@@ -1175,12 +1188,15 @@ function generateKeyGraphs(
     }
   }
 
-  // 5. Vegetation Health (NDVI) Trend
+  // 5. Vegetation Health (NDVI) Trend - ALWAYS use all years data for trend
   if (
-    carbonData?.yearly_data?.some((y) => y.vegetation_indicators?.average_ndvi)
+    allCarbonData?.yearly_data?.some(
+      (y) => y.vegetation_indicators?.average_ndvi,
+    )
   ) {
-    const ndviYears = carbonData.yearly_data
+    const ndviYears = allCarbonData.yearly_data
       .filter((y) => y.vegetation_indicators?.average_ndvi)
+      .sort((a, b) => a.year - b.year)
       .map((d) => d.year);
 
     if (ndviYears.length > 0) {
@@ -1193,8 +1209,9 @@ function generateKeyGraphs(
         datasets: [
           {
             label: "Average NDVI",
-            data: carbonData.yearly_data
+            data: allCarbonData.yearly_data
               .filter((y) => y.vegetation_indicators?.average_ndvi)
+              .sort((a, b) => a.year - b.year)
               .map((y) => y.vegetation_indicators.average_ndvi),
             borderColor: "#1abc9c",
             backgroundColor: "rgba(26, 188, 156, 0.1)",
@@ -1204,114 +1221,19 @@ function generateKeyGraphs(
         ],
         interpretation:
           "NDVI > 0.4 indicates healthy vegetation; trends show ecosystem changes",
-      };
-    }
-  }
-
-  // 6. Carbon Intensity Trend (Alternative)
-  if (
-    carbonData?.yearly_data?.length > 0 &&
-    carbonData.yearly_data.some(
-      (d) => d.emissions?.total_scope_emission_tco2e,
-    ) &&
-    carbonData.yearly_data.some((d) => d.sequestration?.soc_area_ha)
-  ) {
-    const intensityYears = carbonData.yearly_data
-      .filter(
-        (d) =>
-          d.emissions?.total_scope_emission_tco2e &&
-          d.sequestration?.soc_area_ha,
-      )
-      .map((d) => d.year);
-
-    if (intensityYears.length > 0) {
-      const intensityData = carbonData.yearly_data
-        .filter(
-          (d) =>
-            d.emissions?.total_scope_emission_tco2e &&
-            d.sequestration?.soc_area_ha,
-        )
-        .map(
-          (d) =>
-            d.emissions.total_scope_emission_tco2e /
-            d.sequestration.soc_area_ha,
-        );
-
-      allGraphs.carbon_intensity = {
-        type: "bar",
-        title: "Carbon Intensity Trend",
-        description: "Emissions per hectare over time - Efficiency metric",
-        labels: intensityYears,
-        datasets: [
-          {
-            label: "Carbon Intensity (tCO₂e/ha)",
-            data: intensityData,
-            backgroundColor: "#e67e22",
-            borderColor: "#d35400",
-            borderWidth: 1,
-          },
-        ],
-        interpretation:
-          "Lower intensity indicates more efficient carbon management per unit area",
-      };
-    }
-  }
-
-  // 7. Sequestration Rate Trend
-  if (
-    carbonData?.yearly_data?.some(
-      (y) =>
-        y.calculated_sequestration?.sequestration_rate_tco2_per_ha_per_year,
-    )
-  ) {
-    const seqYears = carbonData.yearly_data
-      .filter(
-        (y) =>
-          y.calculated_sequestration?.sequestration_rate_tco2_per_ha_per_year,
-      )
-      .map((d) => d.year);
-
-    if (seqYears.length > 0) {
-      allGraphs.sequestration_rate = {
-        type: "line",
-        title: "Sequestration Rate Trend",
-        description: "Annual carbon sequestration rate per hectare",
-        labels: seqYears,
-        datasets: [
-          {
-            label: "Sequestration Rate (tCO₂/ha/year)",
-            data: carbonData.yearly_data
-              .filter(
-                (y) =>
-                  y.calculated_sequestration
-                    ?.sequestration_rate_tco2_per_ha_per_year,
-              )
-              .map(
-                (y) =>
-                  y.calculated_sequestration
-                    .sequestration_rate_tco2_per_ha_per_year,
-              ),
-            borderColor: "#9b59b6",
-            backgroundColor: "rgba(155, 89, 182, 0.1)",
-            fill: true,
-            tension: 0.4,
-          },
-        ],
-        interpretation:
-          "Positive rates indicate carbon sink; critical for carbon credit eligibility",
+        data_period: `${ndviYears[0]} - ${ndviYears[ndviYears.length - 1]}`,
+        note: "Shows multi-year trend regardless of selected year",
       };
     }
   }
 
   // Select top 5 graphs based on priority
   const priorityOrder = [
-    "soc_trend", // Primary soil health indicator
-    "carbon_balance", // Net carbon accounting
-    "emissions_breakdown", // Emission sources
-    "monthly_soc", // Permanence monitoring
-    "ndvi_trend", // Ecosystem health
-    "sequestration_rate", // Credit eligibility
-    "carbon_intensity", // Efficiency
+    "soc_trend", // Primary soil health indicator (multi-year)
+    "carbon_balance", // Net carbon accounting (multi-year)
+    "emissions_breakdown", // Emission sources (current year)
+    "monthly_soc", // Permanence monitoring (current year)
+    "ndvi_trend", // Ecosystem health (multi-year)
   ];
 
   const selectedGraphs = {};
@@ -1324,18 +1246,113 @@ function generateKeyGraphs(
     }
   }
 
-  // If we don't have 5 graphs, add any available ones
-  if (count < 5) {
-    for (const [key, graph] of Object.entries(allGraphs)) {
-      if (!selectedGraphs[key]) {
-        selectedGraphs[key] = graph;
-        count++;
-        if (count >= 5) break;
-      }
-    }
+  return selectedGraphs;
+}
+
+/**
+ * Helper function to calculate trends over multiple years
+ */
+function calculateMultiYearTrend(allCarbonData, metricType) {
+  if (!allCarbonData?.yearly_data || allCarbonData.yearly_data.length < 2) {
+    return "stable";
   }
 
-  return selectedGraphs;
+  const yearlyData = allCarbonData.yearly_data.sort((a, b) => a.year - b.year);
+
+  let firstValue = null;
+  let lastValue = null;
+
+  if (metricType === "soc") {
+    const socData = yearlyData.filter(
+      (d) => d.calculated_soc?.average_tc_per_ha,
+    );
+    if (socData.length < 2) return "stable";
+
+    firstValue = socData[0].calculated_soc.average_tc_per_ha;
+    lastValue = socData[socData.length - 1].calculated_soc.average_tc_per_ha;
+  } else if (metricType === "ndvi") {
+    const ndviData = yearlyData.filter(
+      (d) => d.vegetation_indicators?.average_ndvi,
+    );
+    if (ndviData.length < 2) return "stable";
+
+    firstValue = ndviData[0].vegetation_indicators.average_ndvi;
+    lastValue =
+      ndviData[ndviData.length - 1].vegetation_indicators.average_ndvi;
+  } else if (metricType === "sequestration") {
+    const seqData = yearlyData.filter(
+      (d) =>
+        d.calculated_sequestration?.sequestration_rate_tco2_per_ha_per_year,
+    );
+    if (seqData.length < 2) return "stable";
+
+    firstValue =
+      seqData[0].calculated_sequestration
+        .sequestration_rate_tco2_per_ha_per_year;
+    lastValue =
+      seqData[seqData.length - 1].calculated_sequestration
+        .sequestration_rate_tco2_per_ha_per_year;
+  } else if (metricType === "emissions") {
+    const emissionsData = yearlyData.filter(
+      (d) => d.emissions?.total_scope_emission_tco2e,
+    );
+    if (emissionsData.length < 2) return "stable";
+
+    firstValue = emissionsData[0].emissions.total_scope_emission_tco2e;
+    lastValue =
+      emissionsData[emissionsData.length - 1].emissions
+        .total_scope_emission_tco2e;
+  }
+
+  if (firstValue === null || lastValue === null || firstValue === 0) {
+    return "stable";
+  }
+
+  const change = ((lastValue - firstValue) / firstValue) * 100;
+
+  if (metricType === "emissions") {
+    // For emissions, decreasing is better
+    return change < -5 ? "improving" : change > 5 ? "declining" : "stable";
+  } else {
+    // For SOC, NDVI, sequestration, increasing is better
+    return change > 5 ? "improving" : change < -5 ? "declining" : "stable";
+  }
+}
+
+/**
+ * Helper function to get soil health trend from multi-year data
+ */
+function calculateSoilHealthTrend(allCarbonData) {
+  if (!allCarbonData?.yearly_data || allCarbonData.yearly_data.length < 2) {
+    return "stable";
+  }
+
+  const yearlyData = allCarbonData.yearly_data.sort((a, b) => a.year - b.year);
+
+  // Calculate trend from multiple indicators
+  const socTrend = calculateMultiYearTrend(allCarbonData, "soc");
+  const sequestrationTrend = calculateMultiYearTrend(
+    allCarbonData,
+    "sequestration",
+  );
+  const ndviTrend = calculateMultiYearTrend(allCarbonData, "ndvi");
+
+  // Weighted decision: SOC is most important, followed by sequestration, then NDVI
+  let improvingCount = 0;
+  let decliningCount = 0;
+
+  if (socTrend === "improving") improvingCount += 3;
+  else if (socTrend === "declining") decliningCount += 3;
+
+  if (sequestrationTrend === "improving") improvingCount += 2;
+  else if (sequestrationTrend === "declining") decliningCount += 2;
+
+  if (ndviTrend === "improving") improvingCount += 1;
+  else if (ndviTrend === "declining") decliningCount += 1;
+
+  if (improvingCount > decliningCount) return "improving";
+  if (decliningCount > improvingCount) return "declining";
+  return "stable";
 }
 
 /**
@@ -1349,8 +1366,16 @@ async function getSoilHealthCarbonQualityData(companyId, year = null) {
     // Get company details with enhanced information
     const company = await getEnhancedCompanyDetails(companyId);
 
-    // Get ALL Carbon Emission Accounting data (complete dataset)
-    const carbonData = await getCarbonEmissionAccountingData(companyId, year);
+    // Get ALL Carbon Emission Accounting data (complete dataset) - for multi-year trends
+    const allCarbonData = await getCarbonEmissionAccountingData(
+      companyId,
+      null,
+    );
+
+    // Get year-specific Carbon Emission Accounting data (if year specified)
+    const carbonDataForYear = year
+      ? await getCarbonEmissionAccountingData(companyId, year)
+      : allCarbonData;
 
     // Get ALL ESG metrics (all categories, not just environmental)
     const allESGMetrics = await getAllESGMetrics(companyId, year ? [year] : []);
@@ -1360,12 +1385,13 @@ async function getSoilHealthCarbonQualityData(companyId, year = null) {
 
     // Get unique years from data
     const yearsFromESG = getUniqueYearsFromMetrics(environmentalMetrics, year);
-    const yearsFromCarbon = carbonData?.yearly_data?.map((d) => d.year) || [];
+    const yearsFromCarbon =
+      allCarbonData?.yearly_data?.map((d) => d.year) || [];
     const allYears = Array.from(
       new Set([...yearsFromESG, ...yearsFromCarbon]),
     ).sort();
 
-    if (allYears.length === 0 && !carbonData) {
+    if (allYears.length === 0 && !allCarbonData) {
       throw new AppError(
         "No soil health and carbon quality data available",
         404,
@@ -1377,56 +1403,63 @@ async function getSoilHealthCarbonQualityData(companyId, year = null) {
       year ||
       (allYears.length > 0
         ? Math.max(...allYears)
-        : carbonData?.yearly_data?.length > 0
-          ? Math.max(...carbonData.yearly_data.map((d) => d.year))
+        : allCarbonData?.yearly_data?.length > 0
+          ? Math.max(...allCarbonData.yearly_data.map((d) => d.year))
           : null);
 
-    // Calculate soil health indicators from carbon data
+    // Calculate soil health indicators from year-specific data
     const soilHealthIndicators = calculateSoilHealthIndicators(
-      carbonData,
+      carbonDataForYear,
       currentYear,
     );
 
-    // Calculate confidence score
-    const confidenceScore = calculateConfidenceScore(carbonData, allESGMetrics);
+    // Calculate confidence score using all data
+    const confidenceScore = calculateConfidenceScore(
+      allCarbonData,
+      allESGMetrics,
+    );
 
-    // Predict carbon sequestration for credits
+    // Predict carbon sequestration for credits using all data
     const sequestrationPrediction = predictCarbonSequestration(
-      carbonData,
+      allCarbonData,
       soilHealthIndicators,
       5,
     );
 
-    // Monitor soil degradation/regeneration
+    // Monitor soil degradation/regeneration using all data
     const soilDegradationAnalysis = monitorSoilDegradation(
-      carbonData,
+      allCarbonData,
       allESGMetrics,
       currentYear,
     );
 
     // Generate comprehensive graphs (5 key graphs)
+    // Pass both allCarbonData (for multi-year trends) and carbonDataForYear (for year-specific graphs)
     const graphs = generateKeyGraphs(
-      carbonData,
+      allCarbonData, // For multi-year trend graphs
+      carbonDataForYear, // For year-specific graphs
       allESGMetrics,
       soilHealthIndicators,
       currentYear,
       allYears,
     );
 
-    // Prepare enhanced carbon emission accounting response
-    const carbonEmissionResponse = carbonData
+    // Prepare enhanced carbon emission accounting response using year-specific data
+    const carbonEmissionResponse = carbonDataForYear
       ? {
-          framework: carbonData.framework || {},
-          summary: carbonData.summary || {},
-          methodology: carbonData.emission_references?.methodology_statement,
+          framework: carbonDataForYear.framework || {},
+          summary: carbonDataForYear.summary || {},
+          methodology:
+            carbonDataForYear.emission_references?.methodology_statement,
           emission_factors:
-            carbonData.emission_references?.emission_factors || [],
+            carbonDataForYear.emission_references?.emission_factors || [],
           global_warming_potentials:
-            carbonData.emission_references?.global_warming_potentials || {},
+            carbonDataForYear.emission_references?.global_warming_potentials ||
+            {},
           conversion_factors:
-            carbonData.emission_references?.conversion_factors || {},
+            carbonDataForYear.emission_references?.conversion_factors || {},
           yearly_data_summary:
-            carbonData.yearly_data?.map((yearData) => ({
+            carbonDataForYear.yearly_data?.map((yearData) => ({
               year: yearData.year,
               sequestration: {
                 reporting_area_ha: yearData.sequestration?.reporting_area_ha,
@@ -1457,17 +1490,19 @@ async function getSoilHealthCarbonQualityData(companyId, year = null) {
               data_quality: yearData.data_quality,
             })) || [],
           area_coverage: {
-            reporting_area_ha: carbonData.summary?.total_reporting_area_ha,
+            reporting_area_ha:
+              carbonDataForYear.summary?.total_reporting_area_ha,
             soc_area_ha:
-              carbonData.yearly_data?.[carbonData.yearly_data.length - 1]
-                ?.sequestration?.soc_area_ha,
+              carbonDataForYear.yearly_data?.[
+                carbonDataForYear.yearly_data.length - 1
+              ]?.sequestration?.soc_area_ha,
           },
           // Include detailed monthly data for current year if requested
           detailed_monthly_data:
             year &&
-            carbonData.yearly_data?.find((y) => y.year === year)?.sequestration
-              ?.monthly_data
-              ? carbonData.yearly_data
+            carbonDataForYear.yearly_data?.find((y) => y.year === year)
+              ?.sequestration?.monthly_data
+              ? carbonDataForYear.yearly_data
                   .find((y) => y.year === year)
                   .sequestration.monthly_data.sort(
                     (a, b) => (a.month_number || 0) - (b.month_number || 0),
@@ -1500,7 +1535,20 @@ async function getSoilHealthCarbonQualityData(companyId, year = null) {
         )
       : null;
 
-    // Prepare comprehensive environmental metrics summary
+    // Calculate multi-year trends from all data
+    const socTrendAllYears = calculateMultiYearTrend(allCarbonData, "soc");
+    const ndviTrendAllYears = calculateMultiYearTrend(allCarbonData, "ndvi");
+    const sequestrationTrendAllYears = calculateMultiYearTrend(
+      allCarbonData,
+      "sequestration",
+    );
+    const emissionsTrendAllYears = calculateMultiYearTrend(
+      allCarbonData,
+      "emissions",
+    );
+    const soilHealthTrendAllYears = calculateSoilHealthTrend(allCarbonData);
+
+    // Prepare environmental metrics summary
     const environmentalMetricsSummary = Object.keys(environmentalMetrics).map(
       (key) => ({
         name: environmentalMetrics[key].name,
@@ -1527,15 +1575,21 @@ async function getSoilHealthCarbonQualityData(companyId, year = null) {
         endpoint: "soil_health_carbon_quality",
         company_id: companyId,
         year_requested: year,
-        data_sources: carbonData
+        year_used_for_current_values: currentYear,
+        trend_period:
+          allYears.length > 0
+            ? `${Math.min(...allYears)} - ${Math.max(...allYears)}`
+            : "N/A",
+        data_sources: allCarbonData
           ? ["CarbonEmissionAccounting", "ESGData", "SatelliteIndices"]
           : ["ESGData"],
-        calculation_methods: carbonData
+        calculation_methods: allCarbonData
           ? [
               "SOC calculated from satellite-derived NDVI/NDWI/NDBI indices",
               "Carbon sequestration estimated using IPCC AFOLU guidelines",
               "Monthly composites from Sentinel-2 imagery at 10m resolution",
               "Carbon permanence assessment based on variance and trend analysis",
+              "Multi-year trends calculated from complete historical data",
             ]
           : ["ESG metrics from company reports"],
       },
@@ -1544,32 +1598,36 @@ async function getSoilHealthCarbonQualityData(companyId, year = null) {
         start_year:
           allYears.length > 0
             ? Math.min(...allYears)
-            : carbonData?.yearly_data?.[0]?.year,
+            : allCarbonData?.yearly_data?.[0]?.year,
         end_year: allYears.length > 0 ? Math.max(...allYears) : currentYear,
         current_year: currentYear,
         data_available_years: allYears,
-        carbon_data_years: carbonData?.yearly_data?.map((d) => d.year) || [],
+        carbon_data_years: allCarbonData?.yearly_data?.map((d) => d.year) || [],
         esg_data_years: yearsFromESG,
+        note: year
+          ? "Trend graphs show multi-year data; other graphs show selected year data"
+          : "All graphs show available multi-year data",
       },
       confidence_score: {
         overall: confidenceScore,
         breakdown: {
-          data_completeness: carbonData ? 85 : 40,
-          verification_status: carbonData?.yearly_data?.some(
+          data_completeness: allCarbonData ? 85 : 40,
+          verification_status: allCarbonData?.yearly_data?.some(
             (d) => d.data_quality?.verification_status === "verified",
           )
             ? 90
             : 50,
           temporal_coverage:
             allYears.length >= 3 ? 80 : allYears.length >= 2 ? 60 : 30,
-          methodological_rigor: carbonData?.framework?.sequestration_methodology
+          methodological_rigor: allCarbonData?.framework
+            ?.sequestration_methodology
             ? 85
             : 50,
-          monthly_data_availability: carbonData?.yearly_data?.some(
+          monthly_data_availability: allCarbonData?.yearly_data?.some(
             (y) => y.sequestration?.monthly_data?.length >= 6,
           )
             ? 90
-            : carbonData?.yearly_data?.some(
+            : allCarbonData?.yearly_data?.some(
                   (y) => y.sequestration?.monthly_data?.length >= 3,
                 )
               ? 60
@@ -1589,12 +1647,16 @@ async function getSoilHealthCarbonQualityData(companyId, year = null) {
       soil_organic_carbon_quantification: {
         current_value: soilHealthIndicators.soilOrganicCarbon.value,
         unit: soilHealthIndicators.soilOrganicCarbon.unit,
-        trend: soilHealthIndicators.soilOrganicCarbon.trend,
+        trend: socTrendAllYears, // Use multi-year trend
+        trend_period:
+          allYears.length > 0
+            ? `${Math.min(...allYears)} - ${Math.max(...allYears)}`
+            : "N/A",
         annual_change_percent:
           soilHealthIndicators.soilOrganicCarbon.annual_trend,
         confidence: soilHealthIndicators.soilOrganicCarbon.confidence,
         calculation_method:
-          carbonData?.framework?.sequestration_methodology ||
+          allCarbonData?.framework?.sequestration_methodology ||
           "IPCC 2006 Guidelines for AFOLU sector",
         monthly_data_available:
           soilHealthIndicators.soilOrganicCarbon.monthly_data.length > 0,
@@ -1633,21 +1695,23 @@ async function getSoilHealthCarbonQualityData(companyId, year = null) {
               : "Low carbon permanence - Not suitable for carbon credits without improvement",
       },
 
-      // SOIL HEALTH TRENDS
+      // SOIL HEALTH TRENDS - ALWAYS use multi-year data for trends
       soil_health_trends: {
-        soc_trend: soilHealthIndicators.soilOrganicCarbon.trend,
+        soc_trend: socTrendAllYears, // Multi-year trend
         carbon_stock_trend: soilHealthIndicators.carbonStock.trend,
-        sequestration_trend: soilHealthIndicators.sequestrationRate.trend,
-        vegetation_trend: soilHealthIndicators.vegetationHealth.ndvi_trend,
-        overall_trend:
-          soilHealthIndicators.soilOrganicCarbon.trend === "improving" &&
-          soilHealthIndicators.carbonStock.trend === "improving"
-            ? "improving"
-            : soilHealthIndicators.soilOrganicCarbon.trend === "declining" ||
-                soilHealthIndicators.carbonStock.trend === "declining"
-              ? "declining"
-              : "stable",
-        monitoring_period: `${allYears[0] || "N/A"} - ${allYears[allYears.length - 1] || "N/A"}`,
+        sequestration_trend: sequestrationTrendAllYears, // Multi-year trend
+        vegetation_trend: ndviTrendAllYears, // Multi-year trend
+        emissions_trend: emissionsTrendAllYears, // Multi-year trend
+        overall_trend: soilHealthTrendAllYears, // Multi-year trend
+        monitoring_period:
+          allYears.length > 0
+            ? `${Math.min(...allYears)} - ${Math.max(...allYears)}`
+            : "N/A",
+        trend_calculation_method:
+          "Multi-year analysis using complete historical data",
+        note: year
+          ? "Trends calculated from all available years, not just selected year"
+          : "Trends calculated from available multi-year data",
       },
 
       // CARBON STOCK ANALYSIS
@@ -1659,8 +1723,9 @@ async function getSoilHealthCarbonQualityData(companyId, year = null) {
         sequestration_unit: soilHealthIndicators.sequestrationRate.unit,
         annual_sequestration_total:
           soilHealthIndicators.sequestrationRate.annual_total,
-        net_balance: carbonData?.summary?.net_carbon_balance_tco2e,
-        carbon_intensity: carbonData?.summary?.carbon_intensity_tco2e_per_ha,
+        net_balance: carbonDataForYear?.summary?.net_carbon_balance_tco2e,
+        carbon_intensity:
+          carbonDataForYear?.summary?.carbon_intensity_tco2e_per_ha,
         monthly_data_available:
           soilHealthIndicators.carbonStock.monthly_data.length > 0,
       },
@@ -1668,7 +1733,7 @@ async function getSoilHealthCarbonQualityData(companyId, year = null) {
       // VEGETATION HEALTH
       vegetation_health: {
         average_ndvi: soilHealthIndicators.vegetationHealth.average_ndvi,
-        ndvi_trend: soilHealthIndicators.vegetationHealth.ndvi_trend,
+        ndvi_trend: ndviTrendAllYears, // Multi-year trend
         classification: soilHealthIndicators.vegetationHealth.classification,
         interpretation: soilHealthIndicators.vegetationHealth.average_ndvi
           ? soilHealthIndicators.vegetationHealth.average_ndvi > 0.6
@@ -1683,7 +1748,7 @@ async function getSoilHealthCarbonQualityData(companyId, year = null) {
           soilHealthIndicators.vegetationHealth.monthly_data.length > 0,
       },
 
-      // COMPLETE CARBON EMISSION DATA
+      // COMPLETE CARBON EMISSION DATA (year-specific if year provided)
       carbon_emission_accounting: carbonEmissionResponse,
 
       // COMPLETE ENVIRONMENTAL ESG DATA
@@ -1742,28 +1807,13 @@ async function getSoilHealthCarbonQualityData(companyId, year = null) {
         },
       },
 
-      // ALL ESG METRICS (ENVIRONMENTAL, SOCIAL, GOVERNANCE)
-      all_esg_metrics: {
-        environmental: {
-          count: Object.keys(allESGMetrics.environmental || {}).length,
-          metrics: Object.keys(allESGMetrics.environmental || {}),
-        },
-        social: {
-          count: Object.keys(allESGMetrics.social || {}).length,
-          metrics: Object.keys(allESGMetrics.social || {}),
-        },
-        governance: {
-          count: Object.keys(allESGMetrics.governance || {}).length,
-          metrics: Object.keys(allESGMetrics.governance || {}),
-        },
-      },
-
       // ANALYTICS GRAPHS (5 KEY GRAPHS)
       graphs: graphs,
 
       // REGENERATIVE AGRICULTURE OUTCOMES
       regenerative_agriculture_outcomes: {
         soil_health_score: soilHealthScore,
+        soil_health_trend: soilHealthTrendAllYears, // Multi-year trend
         carbon_sequestration_potential: soilHealthIndicators.sequestrationRate
           .value
           ? soilHealthIndicators.sequestrationRate.value * 100
@@ -1776,7 +1826,7 @@ async function getSoilHealthCarbonQualityData(companyId, year = null) {
               soilHealthIndicators.vegetationHealth.average_ndvi * 100,
             )
           : null,
-        verification_status: carbonData?.yearly_data?.some(
+        verification_status: allCarbonData?.yearly_data?.some(
           (d) => d.data_quality?.verification_status === "verified",
         )
           ? "Verified"
@@ -1822,21 +1872,20 @@ async function getSoilHealthCarbonQualityData(companyId, year = null) {
         key_indicators: {
           soil_organic_carbon: soilHealthIndicators.soilOrganicCarbon.value,
           carbon_stock: soilHealthIndicators.carbonStock.value,
-          net_carbon_balance: carbonData?.summary?.net_carbon_balance_tco2e,
-          carbon_intensity: carbonData?.summary?.carbon_intensity_tco2e_per_ha,
+          net_carbon_balance:
+            carbonDataForYear?.summary?.net_carbon_balance_tco2e,
+          carbon_intensity:
+            carbonDataForYear?.summary?.carbon_intensity_tco2e_per_ha,
           vegetation_health: soilHealthIndicators.vegetationHealth.average_ndvi,
           sequestration_rate: soilHealthIndicators.sequestrationRate.value,
           permanence_rating: soilHealthIndicators.carbonPermanence.rating,
         },
         trends: {
-          soil_health: soilHealthIndicators.soilOrganicCarbon.trend,
+          soil_health: soilHealthTrendAllYears, // Multi-year trend
           carbon_stock: soilHealthIndicators.carbonStock.trend,
-          emissions: calculateTrend(
-            environmentalMetrics["Carbon Emissions (Total GHG, tCO2e)"],
-            yearsFromESG,
-          ),
-          sequestration: soilHealthIndicators.sequestrationRate.trend,
-          vegetation: soilHealthIndicators.vegetationHealth.ndvi_trend,
+          emissions: emissionsTrendAllYears, // Multi-year trend
+          sequestration: sequestrationTrendAllYears, // Multi-year trend
+          vegetation: ndviTrendAllYears, // Multi-year trend
           degradation: soilDegradationAnalysis.degradation_status,
           regeneration: soilDegradationAnalysis.regeneration_status,
         },
@@ -1916,18 +1965,18 @@ async function getSoilHealthCarbonQualityData(companyId, year = null) {
                 ? "Medium"
                 : "Low",
           gaps_identified: [
-            ...(!carbonData ? ["Carbon accounting data missing"] : []),
+            ...(!allCarbonData ? ["Carbon accounting data missing"] : []),
             ...(soilHealthIndicators.soilOrganicCarbon.value === null
               ? ["Soil organic carbon measurements needed"]
               : []),
-            ...(carbonData &&
-            carbonData.yearly_data?.some(
+            ...(allCarbonData &&
+            allCarbonData.yearly_data?.some(
               (y) => !y.sequestration?.monthly_data?.length,
             )
               ? ["Monthly sequestration data incomplete"]
               : []),
-            ...(carbonData &&
-            !carbonData.yearly_data?.some(
+            ...(allCarbonData &&
+            !allCarbonData.yearly_data?.some(
               (y) => y.data_quality?.verification_status === "verified",
             )
               ? ["Carbon data not verified by third party"]
