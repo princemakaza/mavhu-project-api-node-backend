@@ -51,8 +51,7 @@ class CarbonEmissionService {
 
   /**
    * Get carbon emission accounting by ID
-   */      const carbonRecord = await this.CarbonEmissionAccounting.findById(
-
+   */
   async getCarbonEmissionById(id, populate = []) {
     try {
       const query = this.CarbonEmissionAccounting.findById(id)
