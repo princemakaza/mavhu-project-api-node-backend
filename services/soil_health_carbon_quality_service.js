@@ -941,8 +941,8 @@ function monitorSoilDegradation(carbonData, esgMetrics, currentYear) {
     regeneration_status: "unknown",
     risk_factors: [],
     improvement_opportunities: [],
-    degradation_score: 50, // 0-100, higher is worse
-    regeneration_potential: 50, // 0-100, higher is better
+    degradation_score: 0, // 0-100, higher is worse
+    regeneration_potential: 0, // 0-100, higher is better
   };
 
   if (!carbonData || !carbonData.yearly_data) return indicators;
@@ -1611,14 +1611,14 @@ async function getSoilHealthCarbonQualityData(companyId, year = null) {
       confidence_score: {
         overall: confidenceScore,
         breakdown: {
-          data_completeness: allCarbonData ? 85 : 40,
+          data_completeness: allCarbonData ? 0 : 0,
           verification_status: allCarbonData?.yearly_data?.some(
             (d) => d.data_quality?.verification_status === "verified",
           )
-            ? 90
-            : 50,
+            ? 0
+            : 0,
           temporal_coverage:
-            allYears.length >= 3 ? 80 : allYears.length >= 2 ? 60 : 30,
+            allYears.length >= 3 ? 0 : allYears.length >= 2 ? 0 : 0,
           methodological_rigor: allCarbonData?.framework
             ?.sequestration_methodology
             ? 85
@@ -1626,12 +1626,12 @@ async function getSoilHealthCarbonQualityData(companyId, year = null) {
           monthly_data_availability: allCarbonData?.yearly_data?.some(
             (y) => y.sequestration?.monthly_data?.length >= 6,
           )
-            ? 90
+            ? 0
             : allCarbonData?.yearly_data?.some(
                   (y) => y.sequestration?.monthly_data?.length >= 3,
                 )
-              ? 60
-              : 30,
+              ? 0
+              : 0,
         },
         interpretation:
           confidenceScore >= 80
