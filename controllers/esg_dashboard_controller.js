@@ -297,7 +297,7 @@ const getAllESGDashboardData = asyncHandler(async (req, res) => {
     esgDashboardService.getCropYieldForecastData(companyId, year),
     esgDashboardService.getGHGEmissionsData(companyId, year),
     esgDashboardService.getBiodiversityLandUseData(companyId, year),
-    esgDashboardService.getIrrigationWaterRiskData(companyId, year),
+    IrrigationWaterRiskData.getIrrigationWaterRiskData(companyId, year),
     esgDashboardService.getFarmComplianceData(companyId, year),
     esgDashboardService.getEnergyRenewablesData(companyId, year),
     esgDashboardService.getWasteManagementData(companyId, year),
