@@ -313,6 +313,42 @@ const validateImportData = asyncHandler(async (req, res) => {
   });
 });
 
+/**
+ * Get ESG data by company, year, and category
+ * GET /api/v1/esg-data/company/:companyId/year/:year/category/:category
+ */
+const getESGDataByCompanyYearAndCategory = asyncHandler(async (req, res) => {
+  const { companyId, year, category } = req.params;
+  
+  // Validate year parameter
+  const yearNum = parseInt(year);
+  if (isNaN(yearNum) || yearNum < 2000 || yearNum > 2100) {
+    throw new AppError("Invalid year. Must be between 2000 and 2100", 400, "INVALID_YEAR");
+  }
+
+  const esgData = await esgDataService.getESGDataByCompanyYearAndCategory(
+    companyId,
+    yearNum,
+    category
+  );
+
+  res.status(200).json({
+    message: "ESG data retrieved successfully",
+    count: esgData.length,
+    filter: {
+      company: companyId,
+      year: yearNum,
+      category: category
+    },
+    versions: {
+      api_version: process.env.API_VERSION || "1.0.0",
+      calculation_version: process.env.CALCULATION_VERSION || "1.0.0",
+      gee_adapter_version: process.env.GEE_ADAPTER_VERSION || "1.0.0"
+    },
+    esgData,
+  });
+});
+
 module.exports = {
   createESGData,
   createBulkESGData,
@@ -326,4 +362,5 @@ module.exports = {
   verifyESGData,
   getESGDataStats,
   validateImportData,
+  getESGDataByCompanyYearAndCategory
 };

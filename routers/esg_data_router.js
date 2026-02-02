@@ -196,6 +196,82 @@ router.post("/upload", authenticate, esgDataController.uploadESGDataFile);
 
 /**
  * @swagger
+ * /api/v1/esg-data/company/{companyId}/year/{year}/category/{category}:
+ *   get:
+ *     tags: [ESG Data]
+ *     summary: Get ESG data by company, year, and category
+ *     description: Retrieve ESG data filtered by company ID, specific year, and category (environmental, social, or governance)
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: companyId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID of the company
+ *       - in: path
+ *         name: year
+ *         required: true
+ *         schema:
+ *           type: integer
+ *           minimum: 2000
+ *           maximum: 2100
+ *         description: Year to filter data by (e.g., 2024)
+ *       - in: path
+ *         name: category
+ *         required: true
+ *         schema:
+ *           type: string
+ *           enum: [environmental, social, governance]
+ *         description: ESG category to filter by
+ *     responses:
+ *       200:
+ *         description: ESG data retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                 count:
+ *                   type: integer
+ *                 filter:
+ *                   type: object
+ *                   properties:
+ *                     company:
+ *                       type: string
+ *                     year:
+ *                       type: integer
+ *                     category:
+ *                       type: string
+ *                 versions:
+ *                   type: object
+ *                   properties:
+ *                     api_version:
+ *                       type: string
+ *                     calculation_version:
+ *                       type: string
+ *                     gee_adapter_version:
+ *                       type: string
+ *                 esgData:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *       400:
+ *         description: Invalid parameters
+ *       404:
+ *         description: Company not found or no data available
+ */
+router.get(
+  "/company/:companyId/year/:year/category/:category",
+  authenticate,
+  esgDataController.getESGDataByCompanyYearAndCategory,
+);
+
+/**
+ * @swagger
  * /api/v1/esg-data:
  *   post:
  *     tags: [ESG Data]
@@ -271,7 +347,7 @@ router.post("/bulk", authenticate, esgDataController.createBulkESGData);
 router.post(
   "/validate-import",
   authenticate,
-  esgDataController.validateImportData
+  esgDataController.validateImportData,
 );
 
 /**
@@ -319,7 +395,7 @@ router.get("/:id", authenticate, esgDataController.getESGDataById);
 router.get(
   "/company/:companyId",
   authenticate,
-  esgDataController.getESGDataByCompany
+  esgDataController.getESGDataByCompany,
 );
 
 /**
@@ -350,7 +426,7 @@ router.get(
 router.get(
   "/company/:companyId/year/:year",
   authenticate,
-  esgDataController.getESGDataByCompanyAndYear
+  esgDataController.getESGDataByCompanyAndYear,
 );
 
 /**
@@ -382,7 +458,7 @@ router.get(
 router.get(
   "/company/:companyId/category/:category",
   authenticate,
-  esgDataController.getESGDataByCompanyAndCategory
+  esgDataController.getESGDataByCompanyAndCategory,
 );
 
 /**
@@ -443,7 +519,7 @@ router.patch(
   "/:id/verify",
   authenticate,
   requireOwner,
-  esgDataController.verifyESGData
+  esgDataController.verifyESGData,
 );
 
 /**
@@ -484,7 +560,7 @@ router.get(
   "/stats",
   authenticate,
   requireOwner,
-  esgDataController.getESGDataStats
+  esgDataController.getESGDataStats,
 );
 
 module.exports = router;

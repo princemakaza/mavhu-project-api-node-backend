@@ -5,13 +5,99 @@ const mongoose = require("mongoose");
 const { parse } = require("csv-parse/sync");
 const xlsx = require("xlsx");
 
+// Version constants from environment variables
+const API_VERSION = process.env.API_VERSION || "1.0.0";
+const CALCULATION_VERSION = process.env.CALCULATION_VERSION || "1.0.0";
+const GEE_ADAPTER_VERSION = process.env.GEE_ADAPTER_VERSION || "1.0.0";
+
+async function getESGDataByCompanyYearAndCategory(companyId, year, category) {
+  // Validate category
+  const validCategories = ["environmental", "social", "governance"];
+  if (!validCategories.includes(category)) {
+    throw new AppError(
+      "Invalid category. Must be: environmental, social, or governance",
+      400,
+      "INVALID_CATEGORY",
+    );
+  }
+
+  // Validate year parameter
+  const yearNum = parseInt(year);
+  if (isNaN(yearNum) || yearNum < 2000 || yearNum > 2100) {
+    throw new AppError(
+      "Invalid year. Must be between 2000 and 2100",
+      400,
+      "INVALID_YEAR",
+    );
+  }
+
+  // Check if company exists
+  const company = await Company.findById(companyId);
+  if (!company) throw new AppError("Company not found", 404, "NOT_FOUND");
+
+  // Find ESG data for the company
+  const esgData = await ESGData.find({
+    company: companyId,
+    is_active: true,
+    $or: [
+      { reporting_period_start: { $lte: yearNum } },
+      { reporting_period_end: { $gte: yearNum } },
+    ],
+    "metrics.category": category,
+  })
+    .populate("company") // Populate ALL company data
+    .populate("created_by", "full_name email")
+    .populate("last_updated_by", "full_name email")
+    .populate("verified_by", "full_name email")
+    .sort({ reporting_period_end: -1 });
+
+  // Filter to include only metrics that match the category and have data for the specified year
+  const filteredData = esgData
+    .map((data) => ({
+      ...data.toObject(),
+      metrics: data.metrics.filter(
+        (metric) =>
+          metric.category === category &&
+          metric.values.some((value) => value.year === yearNum),
+      ),
+    }))
+    .filter((data) => data.metrics.length > 0);
+
+  // Add version info to each data item
+  const enhancedData = filteredData.map((data) => ({
+    ...data,
+    metadata: {
+      api_version: API_VERSION,
+      calculation_version: CALCULATION_VERSION,
+      gee_adapter_version: GEE_ADAPTER_VERSION,
+      retrieved_at: new Date(),
+      filter_criteria: {
+        company: companyId,
+        year: yearNum,
+        category: category,
+      },
+    },
+  }));
+
+  return enhancedData;
+}
+
 async function createESGData(data, userId) {
-  const { company, reporting_period_start, reporting_period_end, metrics } = data;
+  const { company, reporting_period_start, reporting_period_end, metrics } =
+    data;
 
   // Validate required fields
-  if (!company) throw new AppError("Company is required", 400, "MISSING_FIELDS", { missing: ["company"] });
+  if (!company)
+    throw new AppError("Company is required", 400, "MISSING_FIELDS", {
+      missing: ["company"],
+    });
   if (!metrics || !Array.isArray(metrics) || metrics.length === 0) {
-    throw new AppError("At least one metric is required", 400, "MISSING_FIELDS", { missing: ["metrics"] });
+    throw new AppError(
+      "At least one metric is required",
+      400,
+      "MISSING_FIELDS",
+      { missing: ["metrics"] },
+    );
   }
 
   // Check if company exists
@@ -19,13 +105,13 @@ async function createESGData(data, userId) {
   if (!companyExists) throw new AppError("Company not found", 404, "NOT_FOUND");
 
   // Prepare metrics with user info
-  const preparedMetrics = metrics.map(metric => ({
+  const preparedMetrics = metrics.map((metric) => ({
     ...metric,
     created_by: userId,
-    values: metric.values.map(value => ({
+    values: metric.values.map((value) => ({
       ...value,
       added_by: userId,
-    }))
+    })),
   }));
 
   const esgData = await ESGData.create({
@@ -39,7 +125,7 @@ async function createESGData(data, userId) {
   if (reporting_period_end) {
     await Company.findByIdAndUpdate(company, {
       latest_esg_report_year: reporting_period_end,
-      esg_data_status: "partial"
+      esg_data_status: "partial",
     });
   }
 
@@ -48,31 +134,41 @@ async function createESGData(data, userId) {
 
 async function createBulkESGData(dataArray, userId, importInfo = {}) {
   if (!Array.isArray(dataArray) || dataArray.length === 0) {
-    throw new AppError("Data array is required and cannot be empty", 400, "INVALID_DATA");
+    throw new AppError(
+      "Data array is required and cannot be empty",
+      400,
+      "INVALID_DATA",
+    );
   }
 
-  const companyIds = [...new Set(dataArray.map(item => item.company))];
-  
+  const companyIds = [...new Set(dataArray.map((item) => item.company))];
+
   // Verify all companies exist
   const companies = await Company.find({ _id: { $in: companyIds } });
-  const existingCompanyIds = companies.map(c => c._id.toString());
-  const missingCompanies = companyIds.filter(id => !existingCompanyIds.includes(id));
-  
+  const existingCompanyIds = companies.map((c) => c._id.toString());
+  const missingCompanies = companyIds.filter(
+    (id) => !existingCompanyIds.includes(id),
+  );
+
   if (missingCompanies.length > 0) {
-    throw new AppError(`Companies not found: ${missingCompanies.join(", ")}`, 404, "COMPANIES_NOT_FOUND");
+    throw new AppError(
+      `Companies not found: ${missingCompanies.join(", ")}`,
+      404,
+      "COMPANIES_NOT_FOUND",
+    );
   }
 
   // Prepare data with user info
-  const preparedData = dataArray.map(data => ({
+  const preparedData = dataArray.map((data) => ({
     ...data,
     ...importInfo,
-    metrics: data.metrics.map(metric => ({
+    metrics: data.metrics.map((metric) => ({
       ...metric,
       created_by: userId,
-      values: metric.values.map(value => ({
+      values: metric.values.map((value) => ({
         ...value,
         added_by: userId,
-      }))
+      })),
     })),
     created_by: userId,
     last_updated_by: userId,
@@ -85,7 +181,7 @@ async function createBulkESGData(dataArray, userId, importInfo = {}) {
     if (data.reporting_period_end) {
       await Company.findByIdAndUpdate(data.company, {
         latest_esg_report_year: data.reporting_period_end,
-        esg_data_status: "partial"
+        esg_data_status: "partial",
       });
     }
   }
@@ -94,10 +190,16 @@ async function createBulkESGData(dataArray, userId, importInfo = {}) {
 }
 
 // NEW FUNCTION: Parse uploaded file
-async function parseAndProcessFile(fileBuffer, fileType, companyId, userId, originalFileName) {
+async function parseAndProcessFile(
+  fileBuffer,
+  fileType,
+  companyId,
+  userId,
+  originalFileName,
+) {
   try {
     let parsedData;
-    
+
     switch (fileType) {
       case "csv":
         parsedData = parseCSV(fileBuffer);
@@ -113,11 +215,15 @@ async function parseAndProcessFile(fileBuffer, fileType, companyId, userId, orig
     }
 
     // Transform parsed data to match our schema
-    const transformedData = transformParsedData(parsedData, companyId, originalFileName);
-    
+    const transformedData = transformParsedData(
+      parsedData,
+      companyId,
+      originalFileName,
+    );
+
     // Create import batch info
     const importBatchId = `FILE_UPLOAD_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    
+
     const importInfo = {
       source_file_name: originalFileName,
       source_file_type: fileType,
@@ -128,220 +234,294 @@ async function parseAndProcessFile(fileBuffer, fileType, companyId, userId, orig
 
     // Use existing bulk create function
     const result = await createBulkESGData(transformedData, userId, importInfo);
-    
+
     return {
       success: true,
       count: result.length,
       batchId: importBatchId,
-      data: result
+      data: result,
     };
   } catch (error) {
     if (error instanceof AppError) {
       throw error;
     }
-    throw new AppError(`File processing failed: ${error.message}`, 500, "FILE_PROCESSING_ERROR");
+    throw new AppError(
+      `File processing failed: ${error.message}`,
+      500,
+      "FILE_PROCESSING_ERROR",
+    );
   }
 }
 
 // Helper function to parse CSV
 function parseCSV(fileBuffer) {
   try {
-    const csvContent = fileBuffer.toString('utf-8');
-    
+    const csvContent = fileBuffer.toString("utf-8");
+
     // Split content by lines and filter out empty lines
-    const lines = csvContent.split('\n').filter(line => line.trim() !== '');
-    
+    const lines = csvContent.split("\n").filter((line) => line.trim() !== "");
+
     if (lines.length < 2) {
-      throw new AppError("CSV file is empty or has no valid data", 400, "EMPTY_FILE");
+      throw new AppError(
+        "CSV file is empty or has no valid data",
+        400,
+        "EMPTY_FILE",
+      );
     }
-    
+
     // Find the header row (look for row containing "Metric" and "2022")
     let headerIndex = -1;
     for (let i = 0; i < lines.length; i++) {
-      if (lines[i].includes('Metric') && (lines[i].includes('2022') || lines[i].includes('2023') || lines[i].includes('2024') || lines[i].includes('2025'))) {
+      if (
+        lines[i].includes("Metric") &&
+        (lines[i].includes("2022") ||
+          lines[i].includes("2023") ||
+          lines[i].includes("2024") ||
+          lines[i].includes("2025"))
+      ) {
         headerIndex = i;
         break;
       }
     }
-    
+
     if (headerIndex === -1) {
-      throw new AppError("Could not find header row in CSV", 400, "INVALID_CSV_FORMAT");
+      throw new AppError(
+        "Could not find header row in CSV",
+        400,
+        "INVALID_CSV_FORMAT",
+      );
     }
-    
+
     // Extract header and data rows
     const headerRow = lines[headerIndex];
     const dataRows = lines.slice(headerIndex + 1);
-    
+
     // Parse CSV with proper header
-    const records = parse([headerRow, ...dataRows].join('\n'), {
+    const records = parse([headerRow, ...dataRows].join("\n"), {
       columns: true,
       skip_empty_lines: true,
       trim: true,
-      relax_column_count: true
+      relax_column_count: true,
     });
-    
+
     if (!records || records.length === 0) {
       throw new AppError("CSV file has no data rows", 400, "NO_DATA_ROWS");
     }
-    
+
     return records;
   } catch (error) {
     if (error instanceof AppError) {
       throw error;
     }
-    throw new AppError(`CSV parsing error: ${error.message}`, 400, "CSV_PARSING_ERROR");
+    throw new AppError(
+      `CSV parsing error: ${error.message}`,
+      400,
+      "CSV_PARSING_ERROR",
+    );
   }
 }
 
 // Helper function to parse Excel
 function parseExcel(fileBuffer) {
   try {
-    const workbook = xlsx.read(fileBuffer, { type: 'buffer' });
+    const workbook = xlsx.read(fileBuffer, { type: "buffer" });
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
-    
+
     // Convert to JSON
     const records = xlsx.utils.sheet_to_json(worksheet, {
       raw: false,
       defval: "",
-      header: 1
+      header: 1,
     });
-    
+
     if (!records || records.length === 0) {
-      throw new AppError("Excel file is empty or has no valid data", 400, "EMPTY_FILE");
+      throw new AppError(
+        "Excel file is empty or has no valid data",
+        400,
+        "EMPTY_FILE",
+      );
     }
-    
+
     // Find header row
     let headerRowIndex = -1;
     for (let i = 0; i < records.length; i++) {
       const row = records[i];
-      if (row && row[0] && (row[0].toString().includes('Metric') || row[0].toString().includes('metric'))) {
+      if (
+        row &&
+        row[0] &&
+        (row[0].toString().includes("Metric") ||
+          row[0].toString().includes("metric"))
+      ) {
         headerRowIndex = i;
         break;
       }
     }
-    
+
     if (headerRowIndex === -1) {
-      throw new AppError("Could not find header row in Excel file", 400, "INVALID_EXCEL_FORMAT");
+      throw new AppError(
+        "Could not find header row in Excel file",
+        400,
+        "INVALID_EXCEL_FORMAT",
+      );
     }
-    
+
     // Extract headers and data
     const headers = records[headerRowIndex];
     const dataRows = records.slice(headerRowIndex + 1);
-    
+
     // Convert to array of objects
-    const formattedRecords = dataRows.map(row => {
-      const obj = {};
-      headers.forEach((header, index) => {
-        if (header !== undefined && header !== null) {
-          obj[header] = row[index] !== undefined ? row[index] : '';
-        }
-      });
-      return obj;
-    }).filter(obj => Object.keys(obj).length > 0 && obj[headers[0]]); // Filter out empty rows
-    
+    const formattedRecords = dataRows
+      .map((row) => {
+        const obj = {};
+        headers.forEach((header, index) => {
+          if (header !== undefined && header !== null) {
+            obj[header] = row[index] !== undefined ? row[index] : "";
+          }
+        });
+        return obj;
+      })
+      .filter((obj) => Object.keys(obj).length > 0 && obj[headers[0]]); // Filter out empty rows
+
     return formattedRecords;
   } catch (error) {
     if (error instanceof AppError) {
       throw error;
     }
-    throw new AppError(`Excel parsing error: ${error.message}`, 400, "EXCEL_PARSING_ERROR");
+    throw new AppError(
+      `Excel parsing error: ${error.message}`,
+      400,
+      "EXCEL_PARSING_ERROR",
+    );
   }
 }
 
 // Helper function to parse JSON
 function parseJSON(fileBuffer) {
   try {
-    const jsonString = fileBuffer.toString('utf-8');
+    const jsonString = fileBuffer.toString("utf-8");
     const parsed = JSON.parse(jsonString);
-    
+
     if (!parsed || (Array.isArray(parsed) && parsed.length === 0)) {
-      throw new AppError("JSON file is empty or has no valid data", 400, "EMPTY_FILE");
+      throw new AppError(
+        "JSON file is empty or has no valid data",
+        400,
+        "EMPTY_FILE",
+      );
     }
-    
+
     // Handle both array and single object
     return Array.isArray(parsed) ? parsed : [parsed];
   } catch (error) {
-    throw new AppError(`JSON parsing error: ${error.message}`, 400, "JSON_PARSING_ERROR");
+    throw new AppError(
+      `JSON parsing error: ${error.message}`,
+      400,
+      "JSON_PARSING_ERROR",
+    );
   }
 }
 
 // Helper function to transform parsed data
 function transformParsedData(parsedRecords, companyId, fileName) {
   const metrics = [];
-  
+
   // Determine category from file name
   let category = "environmental"; // Default
   const fileNameLower = fileName.toLowerCase();
-  if (fileNameLower.includes('social')) {
+  if (fileNameLower.includes("social")) {
     category = "social";
-  } else if (fileNameLower.includes('governance')) {
+  } else if (fileNameLower.includes("governance")) {
     category = "governance";
   }
-  
+
   // Process each record
   for (const record of parsedRecords) {
     // Find metric name field (could be 'Metric', 'metric_name', etc.)
     let metricName = null;
-    const possibleMetricFields = ['Metric', 'metric_name', 'metric', 'Indicator', 'indicator'];
-    
+    const possibleMetricFields = [
+      "Metric",
+      "metric_name",
+      "metric",
+      "Indicator",
+      "indicator",
+    ];
+
     for (const field of possibleMetricFields) {
-      if (record[field] !== undefined && record[field] !== null && record[field].toString().trim() !== '') {
+      if (
+        record[field] !== undefined &&
+        record[field] !== null &&
+        record[field].toString().trim() !== ""
+      ) {
         metricName = record[field].toString().trim();
         break;
       }
     }
-    
+
     if (!metricName) {
       // Try to find any field that looks like a metric name (not a year or source)
       for (const key in record) {
-        if (key && !key.match(/^\d{4}$/) && key.toLowerCase() !== 'source notes' && 
-            key.toLowerCase() !== 'source_notes' && key.toLowerCase() !== 'notes') {
+        if (
+          key &&
+          !key.match(/^\d{4}$/) &&
+          key.toLowerCase() !== "source notes" &&
+          key.toLowerCase() !== "source_notes" &&
+          key.toLowerCase() !== "notes"
+        ) {
           const value = record[key];
-          if (value && value.toString().trim() !== '') {
+          if (value && value.toString().trim() !== "") {
             metricName = value.toString().trim();
             break;
           }
         }
       }
     }
-    
+
     if (!metricName) continue;
-    
+
     const values = [];
-    
+
     // Look for year columns (2022, 2023, 2024, 2025)
     const years = ["2022", "2023", "2024", "2025"];
-    years.forEach(year => {
+    years.forEach((year) => {
       const yearValue = record[year];
-      if (yearValue !== undefined && yearValue !== null && yearValue.toString().trim() !== '') {
+      if (
+        yearValue !== undefined &&
+        yearValue !== null &&
+        yearValue.toString().trim() !== ""
+      ) {
         const strValue = yearValue.toString().trim();
         let numericValue = null;
-        
+
         // Try to parse as number
-        if (!isNaN(strValue) && strValue !== '') {
+        if (!isNaN(strValue) && strValue !== "") {
           numericValue = parseFloat(strValue);
         }
-        
+
         // Get source notes
-        let sourceNotes = '';
-        const possibleSourceFields = ['Source Notes', 'source_notes', 'Source_Notes', 'notes', 'Notes'];
+        let sourceNotes = "";
+        const possibleSourceFields = [
+          "Source Notes",
+          "source_notes",
+          "Source_Notes",
+          "notes",
+          "Notes",
+        ];
         for (const field of possibleSourceFields) {
           if (record[field]) {
             sourceNotes = record[field].toString().trim();
             break;
           }
         }
-        
+
         values.push({
           year: parseInt(year),
           value: strValue,
           numeric_value: numericValue,
-          source_notes: sourceNotes
+          source_notes: sourceNotes,
         });
       }
     });
-    
+
     if (values.length > 0) {
       // Extract unit from metric name if present in parentheses
       let unit = "";
@@ -349,39 +529,50 @@ function transformParsedData(parsedRecords, companyId, fileName) {
       if (unitMatch && unitMatch[1]) {
         unit = unitMatch[1].trim();
       }
-      
+
       // Clean metric name (remove unit from name if present)
-      const cleanMetricName = metricName.replace(/\(.*?\)/g, '').trim();
-      
+      const cleanMetricName = metricName.replace(/\(.*?\)/g, "").trim();
+
       metrics.push({
         category,
         metric_name: cleanMetricName,
         unit: unit || null,
         description: null, // Can be added later
-        values
+        values,
       });
     }
   }
-  
+
   if (metrics.length === 0) {
-    console.log("Debug - No metrics found. First few records:", parsedRecords.slice(0, 3));
-    throw new AppError("No valid metrics found in the file. Please check the file format.", 400, "NO_VALID_DATA");
+    console.log(
+      "Debug - No metrics found. First few records:",
+      parsedRecords.slice(0, 3),
+    );
+    throw new AppError(
+      "No valid metrics found in the file. Please check the file format.",
+      400,
+      "NO_VALID_DATA",
+    );
   }
-  
+
   // Determine reporting period from data
-  const allYears = metrics.flatMap(m => m.values.map(v => v.year));
+  const allYears = metrics.flatMap((m) => m.values.map((v) => v.year));
   if (allYears.length === 0) {
-    throw new AppError("Could not determine reporting period from data", 400, "NO_VALID_YEARS");
+    throw new AppError(
+      "Could not determine reporting period from data",
+      400,
+      "NO_VALID_YEARS",
+    );
   }
-  
+
   const reportingPeriodStart = Math.min(...allYears);
   const reportingPeriodEnd = Math.max(...allYears);
-  
+
   // Extract data source from first record if available
   let dataSource = "Uploaded file";
   const firstRecord = parsedRecords[0];
   if (firstRecord) {
-    const sourceFields = ['Source Notes', 'source_notes', 'Source_Notes'];
+    const sourceFields = ["Source Notes", "source_notes", "Source_Notes"];
     for (const field of sourceFields) {
       if (firstRecord[field]) {
         dataSource = firstRecord[field].toString().trim();
@@ -389,15 +580,17 @@ function transformParsedData(parsedRecords, companyId, fileName) {
       }
     }
   }
-  
-  return [{
-    company: companyId,
-    reporting_period_start: reportingPeriodStart,
-    reporting_period_end: reportingPeriodEnd,
-    data_source: dataSource,
-    source_file_name: fileName,
-    metrics
-  }];
+
+  return [
+    {
+      company: companyId,
+      reporting_period_start: reportingPeriodStart,
+      reporting_period_end: reportingPeriodEnd,
+      data_source: dataSource,
+      source_file_name: fileName,
+      metrics,
+    },
+  ];
 }
 
 async function getESGDataById(esgDataId) {
@@ -432,19 +625,21 @@ async function getESGDataByCompanyAndYear(companyId, year) {
     is_active: true,
     $or: [
       { reporting_period_start: { $lte: year } },
-      { reporting_period_end: { $gte: year } }
-    ]
+      { reporting_period_end: { $gte: year } },
+    ],
   })
-  .populate("company", "name registrationNumber industry")
-  .populate("created_by", "full_name email");
+    .populate("company", "name registrationNumber industry")
+    .populate("created_by", "full_name email");
 
   // Filter to include only metrics that have data for the specified year
-  const filteredData = esgData.map(data => ({
-    ...data.toObject(),
-    metrics: data.metrics.filter(metric => 
-      metric.values.some(value => value.year === year)
-    )
-  })).filter(data => data.metrics.length > 0);
+  const filteredData = esgData
+    .map((data) => ({
+      ...data.toObject(),
+      metrics: data.metrics.filter((metric) =>
+        metric.values.some((value) => value.year === year),
+      ),
+    }))
+    .filter((data) => data.metrics.length > 0);
 
   return filteredData;
 }
@@ -452,7 +647,11 @@ async function getESGDataByCompanyAndYear(companyId, year) {
 async function getESGDataByCompanyAndCategory(companyId, category) {
   const validCategories = ["environmental", "social", "governance"];
   if (!validCategories.includes(category)) {
-    throw new AppError("Invalid category. Must be: environmental, social, or governance", 400, "INVALID_CATEGORY");
+    throw new AppError(
+      "Invalid category. Must be: environmental, social, or governance",
+      400,
+      "INVALID_CATEGORY",
+    );
   }
 
   const company = await Company.findById(companyId);
@@ -461,49 +660,51 @@ async function getESGDataByCompanyAndCategory(companyId, category) {
   const esgData = await ESGData.find({
     company: companyId,
     is_active: true,
-    "metrics.category": category
+    "metrics.category": category,
   })
-  .populate("company", "name registrationNumber industry")
-  .populate("created_by", "full_name email")
-  .sort({ reporting_period_end: -1 });
+    .populate("company", "name registrationNumber industry")
+    .populate("created_by", "full_name email")
+    .sort({ reporting_period_end: -1 });
 
   // Filter to include only metrics of the specified category
-  const filteredData = esgData.map(data => ({
-    ...data.toObject(),
-    metrics: data.metrics.filter(metric => metric.category === category)
-  })).filter(data => data.metrics.length > 0);
+  const filteredData = esgData
+    .map((data) => ({
+      ...data.toObject(),
+      metrics: data.metrics.filter((metric) => metric.category === category),
+    }))
+    .filter((data) => data.metrics.length > 0);
 
   return filteredData;
 }
 
 async function updateESGData(esgDataId, updateData, userId) {
   const update = { ...updateData };
-  
+
   // Add update tracking
   update.last_updated_at = Date.now();
   update.last_updated_by = userId;
 
   // If updating metrics, ensure created_by is set for new metrics
   if (update.metrics && Array.isArray(update.metrics)) {
-    update.metrics = update.metrics.map(metric => ({
+    update.metrics = update.metrics.map((metric) => ({
       ...metric,
       last_updated_by: userId,
       // Update values with last_updated_by
-      values: metric.values.map(value => ({
+      values: metric.values.map((value) => ({
         ...value,
         last_updated_by: userId,
-        last_updated_at: Date.now()
-      }))
+        last_updated_at: Date.now(),
+      })),
     }));
   }
 
   const esgData = await ESGData.findByIdAndUpdate(
     esgDataId,
     { $set: update },
-    { new: true, runValidators: true }
+    { new: true, runValidators: true },
   )
-  .populate("company", "name registrationNumber industry")
-  .populate("last_updated_by", "full_name email");
+    .populate("company", "name registrationNumber industry")
+    .populate("last_updated_by", "full_name email");
 
   if (!esgData) throw new AppError("ESG data not found", 404, "NOT_FOUND");
 
@@ -547,9 +748,12 @@ async function verifyESGData(esgDataId, userId, verificationData = {}) {
   await esgData.save();
 
   // Update company's ESG data status if verified
-  if (esgData.verification_status === "verified" || esgData.verification_status === "audited") {
+  if (
+    esgData.verification_status === "verified" ||
+    esgData.verification_status === "audited"
+  ) {
     await Company.findByIdAndUpdate(esgData.company, {
-      esg_data_status: "verified"
+      esg_data_status: "verified",
     });
   }
 
@@ -566,9 +770,9 @@ async function getESGDataStats() {
         totalCompanies: { $addToSet: "$company" },
         avgDataQualityScore: { $avg: "$data_quality_score" },
         byCategory: {
-          $push: "$metrics.category"
-        }
-      }
+          $push: "$metrics.category",
+        },
+      },
     },
     {
       $project: {
@@ -576,34 +780,48 @@ async function getESGDataStats() {
         totalCompanies: { $size: "$totalCompanies" },
         avgDataQualityScore: { $round: ["$avgDataQualityScore", 2] },
         verificationStatus: {
-          $cond: [{ $eq: ["$totalEntries", 0] }, [], {
-            $let: {
-              vars: {
-                statuses: ["unverified", "pending", "verified", "audited"]
+          $cond: [
+            { $eq: ["$totalEntries", 0] },
+            [],
+            {
+              $let: {
+                vars: {
+                  statuses: ["unverified", "pending", "verified", "audited"],
+                },
+                in: {
+                  $map: {
+                    input: "$$statuses",
+                    as: "status",
+                    in: {
+                      status: "$$status",
+                      count: {
+                        $size: {
+                          $filter: {
+                            input: "$verification_status",
+                            as: "s",
+                            cond: { $eq: ["$$s", "$$status"] },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
               },
-              in: {
-                $map: {
-                  input: "$$statuses",
-                  as: "status",
-                  in: {
-                    status: "$$status",
-                    count: { $size: { $filter: { input: "$verification_status", as: "s", cond: { $eq: ["$$s", "$$status"] } } } }
-                  }
-                }
-              }
-            }
-          }]
-        }
-      }
-    }
+            },
+          ],
+        },
+      },
+    },
   ]);
 
-  return stats[0] || {
-    totalEntries: 0,
-    totalCompanies: 0,
-    avgDataQualityScore: null,
-    verificationStatus: []
-  };
+  return (
+    stats[0] || {
+      totalEntries: 0,
+      totalCompanies: 0,
+      avgDataQualityScore: null,
+      verificationStatus: [],
+    }
+  );
 }
 
 async function validateImportData(importData, fileType) {
@@ -630,7 +848,7 @@ async function validateImportData(importData, fileType) {
     isValid: errors.length === 0,
     errors,
     warnings,
-    totalRecords: importData?.length || 0
+    totalRecords: importData?.length || 0,
   };
 }
 
@@ -646,5 +864,6 @@ module.exports = {
   deleteESGData,
   verifyESGData,
   getESGDataStats,
-  validateImportData
+  validateImportData,
+  getESGDataByCompanyYearAndCategory
 };
