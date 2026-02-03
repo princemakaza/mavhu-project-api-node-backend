@@ -4,6 +4,14 @@ const CarbonEmissionAccounting = require("../models/carbon_emission_accounting_m
 const AppError = require("../utils/app_error");
 const mongoose = require("mongoose");
 
+
+// Version constants from environment variables
+const API_VERSION = process.env.API_VERSION || "1.0.0";
+const CALCULATION_VERSION = process.env.CALCULATION_VERSION || "1.0.0";
+const GEE_ADAPTER_VERSION = process.env.GEE_ADAPTER_VERSION || "1.0.0";
+
+
+
 /**
  * Helper function to extract metric values by name with proper error handling
  */
@@ -675,6 +683,12 @@ async function getFarmComplianceData(companyId, year) {
 
     // Prepare comprehensive response data
     const data = {
+            versions: {
+        api: API_VERSION,
+        calculation: CALCULATION_VERSION,
+        gee_adapter: GEE_ADAPTER_VERSION,
+      },
+
       // Company information with ALL fields
       company: {
         id: company._id,
@@ -994,6 +1008,7 @@ async function getFarmComplianceData(companyId, year) {
 
       // Metadata
       metadata: {
+        
         generated_at: new Date().toISOString(),
         data_sources_count: allESGData.length,
         metrics_extracted: Object.keys(metrics).length,
