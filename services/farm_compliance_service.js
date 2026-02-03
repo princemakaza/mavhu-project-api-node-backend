@@ -79,7 +79,6 @@ async function getCarbonEmissionData(companyId, year) {
     })
     .populate("company")
     .populate("created_by", "name email")
-    .populate("verified_by", "name email")
     .lean();
 
     if (!carbonData) {
@@ -334,27 +333,7 @@ function extractAuditTrails(esgData) {
   };
 
   esgData.forEach(data => {
-    // Verification audits
-    if (data.verification_status === 'verified' || data.verification_status === 'audited') {
-      auditTrails.verifications.push({
-        data_source: data.data_source,
-        verification_status: data.verification_status,
-        verified_by: data.verified_by,
-        verified_at: data.verified_at,
-        metrics_verified: data.metrics.length
-      });
-    }
 
-    // Validation audits
-    if (data.validation_status === 'validated' || data.validation_status === 'failed_validation') {
-      auditTrails.validations.push({
-        data_source: data.data_source,
-        validation_status: data.validation_status,
-        validation_notes: data.validation_notes,
-        validation_errors: data.validation_errors || [],
-        metrics_count: data.metrics.length
-      });
-    }
 
     // Import audits
     if (data.import_date) {
