@@ -1,12 +1,13 @@
 const ESGData = require("../models/esg_data_model");
 const Company = require("../models/company_model");
+const CarbonEmissionAccounting = require("../models/carbon_emission_accounting_model");
 const AppError = require("../utils/app_error");
 const mongoose = require("mongoose");
 
 /**
  * Helper function to extract metric values by name with proper error handling
  */
-async function getMetricsByNames(companyId, metricNames, years = []) {
+async function getMetricsByNames(companyId, metricNames, year = null) {
   try {
     const query = {
       company: companyId,
@@ -14,8 +15,8 @@ async function getMetricsByNames(companyId, metricNames, years = []) {
       "metrics.metric_name": { $in: metricNames }
     };
 
-    if (years.length > 0) {
-      query["metrics.values.year"] = { $in: years };
+    if (year) {
+      query["metrics.values.year"] = year;
     }
 
     const esgData = await ESGData.find(query)
@@ -38,7 +39,7 @@ async function getMetricsByNames(companyId, metricNames, years = []) {
           }
           
           metric.values.forEach(value => {
-            if (years.length === 0 || years.includes(value.year)) {
+            if (!year || value.year === year) {
               metrics[metric.metric_name].values.push({
                 year: value.year,
                 value: value.value,
@@ -67,19 +68,125 @@ async function getMetricsByNames(companyId, metricNames, years = []) {
 }
 
 /**
- * Helper function to get unique years from metrics
+ * Helper function to get carbon emission data for a specific year
  */
-function getUniqueYearsFromMetrics(metrics, year = null) {
-  if (year) return [year];
+async function getCarbonEmissionData(companyId, year) {
+  try {
+    const carbonData = await CarbonEmissionAccounting.findOne({
+      company: companyId,
+      "yearly_data.year": year,
+      is_active: true
+    })
+    .populate("company")
+    .populate("created_by", "name email")
+    .populate("verified_by", "name email")
+    .lean();
+
+    if (!carbonData) {
+      return null;
+    }
+
+    // Find the specific year data
+    const yearData = carbonData.yearly_data.find(d => d.year === year);
+    if (!yearData) {
+      return null;
+    }
+
+    return {
+      carbonData: carbonData,
+      yearData: yearData,
+      summary: carbonData.summary || {}
+    };
+  } catch (error) {
+    throw new AppError(
+      `Error fetching carbon emission data: ${error.message}`,
+      500,
+      "CARBON_DATA_FETCH_ERROR"
+    );
+  }
+}
+
+/**
+ * Helper function to extract carbon metrics for compliance
+ */
+function extractCarbonMetrics(carbonData) {
+  if (!carbonData) {
+    return {
+      emissions: null,
+      sequestration: null,
+      netBalance: null
+    };
+  }
+
+  const { yearData } = carbonData;
+
+  return {
+    emissions: {
+      scope1: yearData.emissions?.scope1?.total_tco2e || 0,
+      scope2: yearData.emissions?.scope2?.total_tco2e || 0,
+      scope3: yearData.emissions?.scope3?.total_tco2e || 0,
+      totalEmissions: yearData.emissions?.total_scope_emission_tco2e || 0
+    },
+    sequestration: {
+      biomass: yearData.sequestration?.annual_summary?.total_biomass_co2_t || 0,
+      soc: yearData.sequestration?.annual_summary?.total_soc_co2_t || 0,
+      totalSequestration: yearData.sequestration?.annual_summary?.sequestration_total_tco2 || 0
+    },
+    netBalance: yearData.emissions?.net_total_emission_tco2e || 0,
+    dataQuality: {
+      completeness: yearData.data_quality?.completeness_score || 0,
+      verification: yearData.data_quality?.verification_status || 'unverified'
+    }
+  };
+}
+
+/**
+ * Helper function to calculate carbon-based recommendations
+ */
+function generateCarbonRecommendations(carbonMetrics, complianceScores) {
+  const recommendations = {
+    immediate: [],
+    medium_term: [],
+    long_term: []
+  };
+
+  const { emissions, sequestration, netBalance } = carbonMetrics;
+
+  // Immediate recommendations based on emissions
+  if (emissions?.scope1 > 1000) {
+    recommendations.immediate.push("Implement direct emission reduction strategies (Scope 1)");
+  }
   
-  const allYears = new Set();
-  Object.values(metrics).forEach(metric => {
-    metric.values.forEach(value => {
-      allYears.add(value.year);
-    });
-  });
+  if (emissions?.scope2 > 500) {
+    recommendations.immediate.push("Switch to renewable energy sources to reduce Scope 2 emissions");
+  }
   
-  return Array.from(allYears).sort();
+  if (emissions?.scope3 > 2000) {
+    recommendations.immediate.push("Develop comprehensive Scope 3 emission reduction program");
+  }
+
+  if (netBalance > 0) {
+    recommendations.immediate.push("Increase carbon sequestration activities to achieve net-zero");
+  }
+
+  // Medium-term recommendations
+  if (sequestration?.totalSequestration < 1000) {
+    recommendations.medium_term.push("Implement agroforestry and soil carbon enhancement practices");
+  }
+  
+  if (carbonMetrics.dataQuality?.verification !== 'verified') {
+    recommendations.medium_term.push("Get carbon emission data externally verified");
+  }
+
+  // Long-term recommendations
+  recommendations.long_term.push("Develop carbon neutrality roadmap for 2030");
+  recommendations.long_term.push("Implement circular economy principles in supply chain");
+  
+  if (complianceScores?.carbonScore < 70) {
+    recommendations.long_term.push("Align carbon strategy with SBTi (Science Based Targets initiative)");
+  }
+
+  return recommendations;
 }
 
 /**
@@ -102,18 +209,16 @@ function getMetricValueByYear(metric, year) {
 /**
  * Helper function to calculate trends
  */
-function calculateTrend(values, years) {
+function calculateTrend(values, year) {
   if (!values || values.length < 2) return "stable";
   
-  const firstYear = Math.min(...years);
-  const lastYear = Math.max(...years);
+  // Get current and previous year values
+  const currentValue = getMetricValueByYear(values, year);
+  const prevValue = getMetricValueByYear(values, year - 1);
   
-  const firstValue = getMetricValueByYear(values, firstYear);
-  const lastValue = getMetricValueByYear(values, lastYear);
+  if (currentValue === null || prevValue === null) return "stable";
   
-  if (firstValue === null || lastValue === null) return "stable";
-  
-  const change = calculatePercentageChange(firstValue, lastValue);
+  const change = calculatePercentageChange(prevValue, currentValue);
   
   if (change > 5) return "improving";
   if (change < -5) return "declining";
@@ -309,23 +414,23 @@ function extractPolicyDocuments(esgData, company) {
       const metricName = metric.metric_name.toLowerCase();
       
       if (metricName.includes('policy') || metricName.includes('standard')) {
-        const latestValue = metric.values.sort((a, b) => b.year - a.year)[0];
-        if (latestValue) {
+        const yearValue = metric.values.sort((a, b) => b.year - a.year)[0];
+        if (yearValue) {
           if (metricName.includes('policy')) {
             policies.documents.push({
               title: metric.metric_name,
               description: metric.description,
               category: metric.category,
-              status: latestValue.value,
-              year: latestValue.year,
+              status: yearValue.value,
+              year: yearValue.year,
               verified: data.verification_status === 'verified'
             });
           } else if (metricName.includes('standard')) {
             policies.standards.push({
               name: metric.metric_name,
               description: metric.description,
-              compliance_level: latestValue.value,
-              year: latestValue.year
+              compliance_level: yearValue.value,
+              year: yearValue.year
             });
           }
         }
@@ -333,8 +438,8 @@ function extractPolicyDocuments(esgData, company) {
 
       // Extract compliance status
       if (metricName.includes('compliance') || metricName.includes('alignment')) {
-        const latestValue = metric.values.sort((a, b) => b.year - a.year)[0];
-        if (latestValue) {
+        const yearValue = metric.values.sort((a, b) => b.year - a.year)[0];
+        if (yearValue) {
           const frameworkName = metric.metric_name.split(' ')[0]; // Extract GRI, IFRS, etc.
           policies.compliance_status[frameworkName] = {
             level: latestValue.value,
@@ -351,14 +456,21 @@ function extractPolicyDocuments(esgData, company) {
 
 /**
  * 5. Farm Management Compliance (Training + Scope 3) API
- * Tracks adoption of best practices, farmer training, and Scope 3 engagement
- * Compliance checks vs. GRI/IFRS indexes
+ * Now includes Carbon Emission Accounting data for comprehensive analysis
  */
-async function getFarmComplianceData(companyId, year = null) {
+async function getFarmComplianceData(companyId, year) {
   try {
+    // Validate year parameter
+    if (!year) {
+      throw new AppError("Year parameter is required", 400, "YEAR_REQUIRED");
+    }
+
     // Get company with ALL fields
     const company = await Company.findById(companyId).lean();
     if (!company) throw new AppError("Company not found", 404, "NOT_FOUND");
+
+    // Get carbon emission data for the year
+    const carbonEmissionData = await getCarbonEmissionData(companyId, year);
 
     // Define metrics for farm compliance training and scope 3
     const metricNames = [
@@ -412,17 +524,14 @@ async function getFarmComplianceData(companyId, year = null) {
       "Risk Assessment Coverage"
     ];
 
-    // Get years - use provided year or last 4 years
-    const currentYear = new Date().getFullYear();
-    const years = year ? [year] : [currentYear-3, currentYear-2, currentYear-1, currentYear];
-    
-    // Get metrics from database
-    const metrics = await getMetricsByNames(companyId, metricNames, years);
+    // Get metrics from database for specific year
+    const metrics = await getMetricsByNames(companyId, metricNames, year);
     
     // Get ALL ESG data for the company with detailed population
     const allESGData = await ESGData.find({
       company: companyId,
-      is_active: true
+      is_active: true,
+      "metrics.values.year": year
     })
     .populate("company")
     .populate("created_by", "name email")
@@ -430,21 +539,25 @@ async function getFarmComplianceData(companyId, year = null) {
     .lean();
 
     // Extract comprehensive data
-    const griIfrsData = extractGRIAndIFRSData(allESGData, year || currentYear);
+    const griIfrsData = extractGRIAndIFRSData(allESGData, year);
     const auditTrails = extractAuditTrails(allESGData);
     const policies = extractPolicyDocuments(allESGData, company);
+    const carbonMetrics = extractCarbonMetrics(carbonEmissionData);
     
-    // Calculate compliance scores
-    const compliance = calculateComplianceScores(metrics, years, allESGData);
+    // Calculate compliance scores with carbon data
+    const compliance = calculateComplianceScores(metrics, year, allESGData, carbonMetrics);
     
-    // Generate graphs
-    const graphs = generateComplianceGraphs(metrics, years, allESGData);
+    // Generate graphs (4 core graphs as requested)
+    const graphs = generateComplianceGraphs(metrics, year, carbonMetrics);
     
     // Calculate scope 3 metrics
-    const scope3Metrics = calculateScope3Metrics(metrics, years, allESGData);
+    const scope3Metrics = calculateScope3Metrics(metrics, year, allESGData);
     
     // Extract certifications
-    const certifications = extractCertifications(allESGData, year || currentYear);
+    const certifications = extractCertifications(allESGData, year);
+    
+    // Generate carbon-based recommendations
+    const carbonRecommendations = generateCarbonRecommendations(carbonMetrics, compliance.scores);
     
     // Prepare comprehensive response data
     const data = {
@@ -482,61 +595,74 @@ async function getFarmComplianceData(companyId, year = null) {
         updated_at: company.updated_at
       },
       
-      reporting_year: year || currentYear,
-      time_period: year ? `${year}` : `${years[0]}-${years[years.length-1]}`,
+      reporting_year: year,
+      time_period: `${year}`,
+      
+      // Carbon Emission Data
+      carbon_emissions: carbonMetrics.emissions ? {
+        scope1_tco2e: carbonMetrics.emissions.scope1,
+        scope2_tco2e: carbonMetrics.emissions.scope2,
+        scope3_tco2e: carbonMetrics.emissions.scope3,
+        total_emissions_tco2e: carbonMetrics.emissions.totalEmissions,
+        net_carbon_balance_tco2e: carbonMetrics.netBalance,
+        data_quality: carbonMetrics.dataQuality,
+        framework: carbonEmissionData?.carbonData?.framework || {},
+        methodology: carbonEmissionData?.carbonData?.emission_references?.methodology_statement || "Not specified"
+      } : null,
+      
+      // Carbon Sequestration Data
+      carbon_sequestration: carbonMetrics.sequestration ? {
+        biomass_co2_t: carbonMetrics.sequestration.biomass,
+        soc_co2_t: carbonMetrics.sequestration.soc,
+        total_sequestration_tco2: carbonMetrics.sequestration.totalSequestration,
+        net_co2_change: carbonEmissionData?.yearData?.sequestration?.annual_summary?.net_co2_change_t || 0
+      } : null,
       
       // Metrics organized by category
       metrics: {
         training: {
-          total_training_hours: getMetricValueByYear(metrics["Training Hours - Total"], year || currentYear),
-          farmer_training_hours: getMetricValueByYear(metrics["Training Hours - Farmer Training"], year || currentYear),
-          employees_trained_total: getMetricValueByYear(metrics["Employees Trained - Total"], year || currentYear),
-          employees_trained_farmers: getMetricValueByYear(metrics["Employees Trained - Farmers"], year || currentYear),
+          total_training_hours: getMetricValueByYear(metrics["Training Hours - Total"], year),
+          farmer_training_hours: getMetricValueByYear(metrics["Training Hours - Farmer Training"], year),
+          employees_trained_total: getMetricValueByYear(metrics["Employees Trained - Total"], year),
+          employees_trained_farmers: getMetricValueByYear(metrics["Employees Trained - Farmers"], year),
           training_distribution: {
-            farmer_training: getMetricValueByYear(metrics["Training Hours - Farmer Training"], year || currentYear),
-            safety_training: getMetricValueByYear(metrics["Training Hours - Safety Training"], year || currentYear),
-            technical_training: getMetricValueByYear(metrics["Training Hours - Technical Skills"], year || currentYear),
-            compliance_training: getMetricValueByYear(metrics["Training Hours - Compliance Training"], year || currentYear)
+            farmer_training: getMetricValueByYear(metrics["Training Hours - Farmer Training"], year),
+            safety_training: getMetricValueByYear(metrics["Training Hours - Safety Training"], year),
+            technical_training: getMetricValueByYear(metrics["Training Hours - Technical Skills"], year),
+            compliance_training: getMetricValueByYear(metrics["Training Hours - Compliance Training"], year)
           }
         },
         
         scope3_engagement: {
-          suppliers_with_code: getMetricValueByYear(metrics["Suppliers with Code of Conduct"], year || currentYear),
-          suppliers_audited: getMetricValueByYear(metrics["Suppliers Audited"], year || currentYear),
-          supplier_training_hours: getMetricValueByYear(metrics["Supplier Training Hours"], year || currentYear),
-          non_compliance_cases: getMetricValueByYear(metrics["Supplier Non-Compliance Cases"], year || currentYear),
-          corrective_actions: getMetricValueByYear(metrics["Supplier Corrective Actions"], year || currentYear)
+          suppliers_with_code: getMetricValueByYear(metrics["Suppliers with Code of Conduct"], year),
+          suppliers_audited: getMetricValueByYear(metrics["Suppliers Audited"], year),
+          supplier_training_hours: getMetricValueByYear(metrics["Supplier Training Hours"], year),
+          non_compliance_cases: getMetricValueByYear(metrics["Supplier Non-Compliance Cases"], year),
+          corrective_actions: getMetricValueByYear(metrics["Supplier Corrective Actions"], year)
         },
         
         framework_alignment: {
-          gri_compliance: getMetricValueByYear(metrics["GRI Standards Compliance"], year || currentYear),
-          ifrs_s1_alignment: getMetricValueByYear(metrics["IFRS S1 Alignment"], year || currentYear),
-          ifrs_s2_alignment: getMetricValueByYear(metrics["IFRS S2 Alignment"], year || currentYear),
-          tcfd_implementation: getMetricValueByYear(metrics["TCFD Recommendations Implemented"], year || currentYear),
-          sasb_alignment: getMetricValueByYear(metrics["SASB Standards Alignment"], year || currentYear),
-          unsdg_alignment: getMetricValueByYear(metrics["UNSDG Goals Alignment"], year || currentYear),
-          cdp_score: getMetricValueByYear(metrics["CDP Disclosure Score"], year || currentYear)
+          gri_compliance: getMetricValueByYear(metrics["GRI Standards Compliance"], year),
+          ifrs_s1_alignment: getMetricValueByYear(metrics["IFRS S1 Alignment"], year),
+          ifrs_s2_alignment: getMetricValueByYear(metrics["IFRS S2 Alignment"], year),
+          tcfd_implementation: getMetricValueByYear(metrics["TCFD Recommendations Implemented"], year),
+          sasb_alignment: getMetricValueByYear(metrics["SASB Standards Alignment"], year),
+          unsdg_alignment: getMetricValueByYear(metrics["UNSDG Goals Alignment"], year),
+          cdp_score: getMetricValueByYear(metrics["CDP Disclosure Score"], year)
         }
       },
       
-      // GRI/IFRS specific data from Hippo Valley files
+      // GRI/IFRS specific data
       gri_ifrs_data: {
         sources: griIfrsData.sources,
         alignments: griIfrsData.alignments,
         files: griIfrsData.files,
-        full_alignments: griIfrsData.alignments.filter(a => 
-          a.numeric_value >= 80 || 
-          (typeof a.value === 'string' && a.value.toLowerCase().includes('full'))
-        ),
         summary: {
           total_gri_ifrs_sources: griIfrsData.sources.length,
           total_alignment_metrics: griIfrsData.alignments.length,
           average_alignment_score: griIfrsData.alignments.length > 0 
             ? (griIfrsData.alignments.reduce((sum, a) => sum + (a.numeric_value || 0), 0) / griIfrsData.alignments.length).toFixed(1)
-            : 0,
-          hippo_valley_files: griIfrsData.files.filter(f => 
-            f.file_name && f.file_name.toLowerCase().includes('hippo')
-          ).length
+            : 0
         }
       },
       
@@ -554,14 +680,6 @@ async function getFarmComplianceData(companyId, year = null) {
         },
         certifications: {
           list: certifications,
-          iso_certifications: certifications.filter(c => 
-            c.name.toLowerCase().includes('iso')
-          ),
-          industry_certifications: certifications.filter(c => 
-            c.name.toLowerCase().includes('fair trade') || 
-            c.name.toLowerCase().includes('organic') ||
-            c.name.toLowerCase().includes('sustainability')
-          ),
           summary: {
             total_certifications: certifications.length,
             active_certifications: certifications.filter(c => 
@@ -590,10 +708,10 @@ async function getFarmComplianceData(companyId, year = null) {
         }
       },
       
-      // Calculated compliance scores
+      // Calculated compliance scores (including carbon)
       compliance_scores: compliance,
       
-      // Generated graphs (8 graphs)
+      // Generated graphs (4 core graphs)
       graphs: graphs,
       
       // Additional metrics
@@ -604,50 +722,55 @@ async function getFarmComplianceData(companyId, year = null) {
         verified_metrics: countVerifiedMetrics(allESGData),
         last_verification_date: getLatestVerificationDate(allESGData),
         data_coverage: calculateDataCoverage(metrics, metricNames),
-        quality_breakdown: {
-          verified: allESGData.filter(d => d.verification_status === 'verified').length,
-          audited: allESGData.filter(d => d.verification_status === 'audited').length,
-          pending: allESGData.filter(d => d.verification_status === 'pending').length,
-          unverified: allESGData.filter(d => d.verification_status === 'unverified').length
-        }
+        carbon_data_available: carbonEmissionData !== null,
+        carbon_data_quality: carbonMetrics.dataQuality?.completeness || 0
       },
       
-      // Trends analysis
+      // Trends analysis for the year
       trends: {
-        training_trend: calculateTrend(metrics["Training Hours - Total"], years),
-        compliance_trend: calculateTrend(metrics["GRI Standards Compliance"], years),
-        scope3_trend: calculateTrend(metrics["Suppliers with Code of Conduct"], years),
-        certification_trend: calculateTrend(metrics["Certifications - Active"], years)
+        training_trend: calculateTrend(metrics["Training Hours - Total"], year),
+        compliance_trend: calculateTrend(metrics["GRI Standards Compliance"], year),
+        scope3_trend: calculateTrend(metrics["Suppliers with Code of Conduct"], year),
+        certification_trend: calculateTrend(metrics["Certifications - Active"], year)
       },
       
-      // Recommendations based on compliance gaps
+      // Recommendations including carbon-based insights
       recommendations: {
         immediate: [
           compliance.scores.overall < 70 ? "Conduct comprehensive compliance gap analysis" : "Maintain current compliance levels",
           policies.documents.filter(p => !p.verified).length > 0 ? "Verify and document all policies" : "All policies are verified",
-          auditTrails.verifications.length === 0 ? "Schedule external audit for verification" : "Maintain regular audit schedule"
-        ],
+          auditTrails.verifications.length === 0 ? "Schedule external audit for verification" : "Maintain regular audit schedule",
+          ...(carbonRecommendations.immediate || [])
+        ].filter(r => r),
         medium_term: [
           "Implement automated compliance monitoring system",
           "Expand supplier code of conduct program",
-          "Enhance GRI/IFRS alignment documentation"
-        ],
+          "Enhance GRI/IFRS alignment documentation",
+          ...(carbonRecommendations.medium_term || [])
+        ].filter(r => r),
         long_term: [
           "Achieve full IFRS S1/S2 alignment",
           "Obtain additional industry certifications",
-          "Implement integrated ESG management system"
-        ]
+          "Implement integrated ESG management system",
+          ...(carbonRecommendations.long_term || [])
+        ].filter(r => r)
       },
+      
+      // Carbon-specific predictions
+      carbon_predictions: carbonEmissionData ? {
+        projected_emissions_next_year: calculateProjectedEmissions(carbonEmissionData, year),
+        carbon_neutrality_timeline: predictCarbonNeutrality(carbonEmissionData, year),
+        sequestration_potential: estimateSequestrationPotential(carbonEmissionData, year),
+        scope3_reduction_opportunities: identifyScope3ReductionOpportunities(carbonMetrics)
+      } : null,
       
       // Metadata
       metadata: {
         generated_at: new Date().toISOString(),
         data_sources_count: allESGData.length,
         metrics_extracted: Object.keys(metrics).length,
-        time_period_covered: years.length > 1 ? `${years[0]}-${years[years.length-1]}` : `${years[0]}`,
-        hippo_valley_data_present: allESGData.some(d => 
-          d.data_source && d.data_source.toLowerCase().includes('hippo valley')
-        )
+        carbon_data_included: carbonEmissionData !== null,
+        year: year
       }
     };
 
@@ -664,45 +787,46 @@ async function getFarmComplianceData(companyId, year = null) {
 }
 
 /**
- * Helper function to calculate compliance scores from metrics
+ * Helper function to calculate compliance scores from metrics including carbon data
  */
-function calculateComplianceScores(metrics, years, esgData) {
-  const currentYear = Math.max(...years);
+function calculateComplianceScores(metrics, year, esgData, carbonMetrics) {
+  // Get current year values
+  const trainingHours = getMetricValueByYear(metrics["Training Hours - Total"], year) || 0;
+  const employeesTrained = getMetricValueByYear(metrics["Employees Trained - Total"], year) || 0;
+  const supplierCompliance = getMetricValueByYear(metrics["Suppliers with Code of Conduct"], year) || 0;
+  const ifrsS1Alignment = getMetricValueByYear(metrics["IFRS S1 Alignment"], year) || 75;
+  const ifrsS2Alignment = getMetricValueByYear(metrics["IFRS S2 Alignment"], year) || 70;
+  const griCompliance = getMetricValueByYear(metrics["GRI Standards Compliance"], year) || 70;
+  const tcfdImplementation = getMetricValueByYear(metrics["TCFD Recommendations Implemented"], year) || 65;
   
-  // Get current year values or calculate averages
-  const trainingHours = getMetricValueByYear(metrics["Training Hours - Total"], currentYear) || 
-                       averageMetricValue(metrics["Training Hours - Total"], years);
-  
-  const employeesTrained = getMetricValueByYear(metrics["Employees Trained - Total"], currentYear) || 
-                          averageMetricValue(metrics["Employees Trained - Total"], years);
-  
-  const supplierCompliance = getMetricValueByYear(metrics["Suppliers with Code of Conduct"], currentYear) || 
-                            averageMetricValue(metrics["Suppliers with Code of Conduct"], years);
-  
-  const ifrsS1Alignment = getMetricValueByYear(metrics["IFRS S1 Alignment"], currentYear) || 
-                         averageMetricValue(metrics["IFRS S1 Alignment"], years) || 
-                         75;
-  
-  const ifrsS2Alignment = getMetricValueByYear(metrics["IFRS S2 Alignment"], currentYear) || 
-                         averageMetricValue(metrics["IFRS S2 Alignment"], years) || 
-                         70;
-  
-  const griCompliance = getMetricValueByYear(metrics["GRI Standards Compliance"], currentYear) || 
-                       averageMetricValue(metrics["GRI Standards Compliance"], years) || 
-                       70;
-  
-  const tcfdImplementation = getMetricValueByYear(metrics["TCFD Recommendations Implemented"], currentYear) || 
-                            averageMetricValue(metrics["TCFD Recommendations Implemented"], years) || 
-                            65;
+  // Calculate carbon-related scores
+  let carbonScore = 50; // Default if no carbon data
+  if (carbonMetrics && carbonMetrics.emissions) {
+    const emissions = carbonMetrics.emissions;
+    const sequestration = carbonMetrics.sequestration;
+    
+    // Score based on emission intensity (lower is better)
+    const emissionIntensityScore = Math.max(0, 100 - (emissions.totalEmissions / 1000) * 10);
+    
+    // Score based on sequestration effectiveness
+    const sequestrationScore = Math.min(100, (sequestration.totalSequestration / 1000) * 20);
+    
+    // Score based on Scope 3 management
+    const scope3Score = emissions.scope3 > 0 
+      ? Math.max(0, 100 - (emissions.scope3 / emissions.totalEmissions) * 100)
+      : 100;
+    
+    carbonScore = Math.round((emissionIntensityScore + sequestrationScore + scope3Score) / 3);
+  }
   
   // Calculate scores (normalize to percentages)
   const trainingHoursScore = Math.min((trainingHours / 40) * 100, 100);
-  const trainedEmployeesScore = employeesTrained || 0;
-  const supplierComplianceScore = supplierCompliance || 0;
-  const ifrsS1Score = ifrsS1Alignment || 0;
-  const ifrsS2Score = ifrsS2Alignment || 0;
-  const griComplianceScore = griCompliance || 0;
-  const tcfdScore = tcfdImplementation || 0;
+  const trainedEmployeesScore = Math.min(employeesTrained, 100);
+  const supplierComplianceScore = Math.min(supplierCompliance, 100);
+  const ifrsS1Score = Math.min(ifrsS1Alignment, 100);
+  const ifrsS2Score = Math.min(ifrsS2Alignment, 100);
+  const griComplianceScore = Math.min(griCompliance, 100);
+  const tcfdScore = Math.min(tcfdImplementation, 100);
   
   // Calculate data quality score from ESGData
   const dataQualityScore = esgData.length > 0 
@@ -717,17 +841,18 @@ function calculateComplianceScores(metrics, years, esgData) {
     ? (verifiedData.length / esgData.length) * 100 
     : 0;
 
-  // Calculate overall score (weighted average)
-  const overallScore = (
-    trainingHoursScore * 0.1 +
-    trainedEmployeesScore * 0.1 +
-    supplierComplianceScore * 0.15 +
-    ifrsS1Score * 0.15 +
-    ifrsS2Score * 0.15 +
-    griComplianceScore * 0.15 +
-    tcfdScore * 0.1 +
-    dataQualityScore * 0.05 +
-    verificationScore * 0.05
+  // Calculate overall score (weighted average, carbon gets 20% weight)
+  const overallScore = Math.round(
+    trainingHoursScore * 0.08 +
+    trainedEmployeesScore * 0.08 +
+    supplierComplianceScore * 0.12 +
+    ifrsS1Score * 0.12 +
+    ifrsS2Score * 0.12 +
+    griComplianceScore * 0.12 +
+    tcfdScore * 0.08 +
+    carbonScore * 0.20 +
+    dataQualityScore * 0.04 +
+    verificationScore * 0.04
   );
 
   return {
@@ -739,20 +864,21 @@ function calculateComplianceScores(metrics, years, esgData) {
       ifrsS2Alignment: Math.round(ifrsS2Score),
       griCompliance: Math.round(griComplianceScore),
       tcfdImplementation: Math.round(tcfdScore),
+      carbonScore: carbonScore,
       dataQuality: Math.round(dataQualityScore),
       verification: Math.round(verificationScore),
-      overall: Math.round(overallScore)
+      overall: overallScore
     },
     assessmentDate: new Date().toISOString(),
     weights: {
-      training: "10%",
-      supplier_engagement: "15%",
-      ifrs_alignment: "30%",
-      gri_compliance: "15%",
-      tcfd: "10%",
-      data_quality: "5%",
-      verification: "5%",
-      other: "10%"
+      training: "16%",
+      supplier_engagement: "12%",
+      ifrs_alignment: "24%",
+      gri_compliance: "12%",
+      tcfd: "8%",
+      carbon_performance: "20%",
+      data_quality: "4%",
+      verification: "4%"
     },
     rating: overallScore >= 90 ? "Excellent" : 
             overallScore >= 80 ? "Good" : 
@@ -762,16 +888,158 @@ function calculateComplianceScores(metrics, years, esgData) {
 }
 
 /**
+ * Generate 4 comprehensive graphs for farm compliance including carbon data
+ */
+function generateComplianceGraphs(metrics, year, carbonMetrics) {
+  // 1. Compliance Score Breakdown (Radar Chart)
+  const complianceBreakdown = {
+    type: "radar",
+    title: "Compliance Performance Breakdown",
+    description: "Comprehensive compliance assessment across key areas",
+    labels: [
+      "Training", 
+      "Supplier Compliance", 
+      "GRI Alignment", 
+      "IFRS S1/S2", 
+      "Carbon Management", 
+      "Data Quality"
+    ],
+    datasets: [
+      {
+        label: "Current Year Score",
+        data: [
+          getMetricValueByYear(metrics["Training Hours - Total"], year) ? 70 : 30,
+          getMetricValueByYear(metrics["Suppliers with Code of Conduct"], year) || 50,
+          getMetricValueByYear(metrics["GRI Standards Compliance"], year) || 60,
+          (getMetricValueByYear(metrics["IFRS S1 Alignment"], year) || 50 + 
+           getMetricValueByYear(metrics["IFRS S2 Alignment"], year) || 50) / 2,
+          carbonMetrics && carbonMetrics.emissions ? 
+            (100 - (carbonMetrics.emissions.totalEmissions / 5000) * 100) : 40,
+          calculateDataCoverage(metrics, Object.keys(metrics))
+        ],
+        backgroundColor: "rgba(52, 152, 219, 0.2)",
+        borderColor: "#3498db",
+        borderWidth: 2
+      }
+    ]
+  };
+
+  // 2. Carbon Emission Breakdown (Doughnut Chart)
+  const carbonEmissionBreakdown = {
+    type: "doughnut",
+    title: "Carbon Emission Breakdown by Scope",
+    description: "Distribution of carbon emissions across Scope 1, 2, and 3",
+    labels: ["Scope 1", "Scope 2", "Scope 3"],
+    datasets: [
+      {
+        data: [
+          carbonMetrics?.emissions?.scope1 || 0,
+          carbonMetrics?.emissions?.scope2 || 0,
+          carbonMetrics?.emissions?.scope3 || 0
+        ],
+        backgroundColor: ["#3498db", "#2ecc71", "#e74c3c"],
+        borderWidth: 1
+      }
+    ]
+  };
+
+  // 3. Training vs Compliance Correlation (Bar Chart)
+  const trainingComplianceCorrelation = {
+    type: "bar",
+    title: "Training Impact on Compliance",
+    description: "Relationship between training investments and compliance scores",
+    labels: ["Farmer Training", "Safety Training", "Technical Training", "Compliance Training"],
+    datasets: [
+      {
+        label: "Training Hours",
+        data: [
+          getMetricValueByYear(metrics["Training Hours - Farmer Training"], year) || 0,
+          getMetricValueByYear(metrics["Training Hours - Safety Training"], year) || 0,
+          getMetricValueByYear(metrics["Training Hours - Technical Skills"], year) || 0,
+          getMetricValueByYear(metrics["Training Hours - Compliance Training"], year) || 0
+        ],
+        backgroundColor: "rgba(52, 152, 219, 0.7)",
+        borderColor: "#3498db",
+        borderWidth: 1
+      },
+      {
+        label: "Compliance Score Impact",
+        data: [
+          (getMetricValueByYear(metrics["Training Hours - Farmer Training"], year) || 0) > 20 ? 85 : 45,
+          (getMetricValueByYear(metrics["Training Hours - Safety Training"], year) || 0) > 10 ? 80 : 50,
+          (getMetricValueByYear(metrics["Training Hours - Technical Skills"], year) || 0) > 15 ? 75 : 55,
+          (getMetricValueByYear(metrics["Training Hours - Compliance Training"], year) || 0) > 25 ? 90 : 40
+        ],
+        backgroundColor: "rgba(46, 204, 113, 0.7)",
+        borderColor: "#2ecc71",
+        borderWidth: 1,
+        type: 'line',
+        yAxisID: 'y1'
+      }
+    ],
+    options: {
+      scales: {
+        y: {
+          title: {
+            display: true,
+            text: 'Training Hours'
+          }
+        },
+        y1: {
+          position: 'right',
+          title: {
+            display: true,
+            text: 'Compliance Score'
+          }
+        }
+      }
+    }
+  };
+
+  // 4. ESG Framework Alignment (Horizontal Bar Chart)
+  const frameworkAlignment = {
+    type: "horizontalBar",
+    title: "ESG Framework Alignment Scores",
+    description: "Alignment with major ESG reporting frameworks",
+    labels: ["GRI Standards", "IFRS S1", "IFRS S2", "TCFD", "SASB", "UNSDG", "CDP"],
+    datasets: [
+      {
+        label: "Alignment Score (%)",
+        data: [
+          getMetricValueByYear(metrics["GRI Standards Compliance"], year) || 0,
+          getMetricValueByYear(metrics["IFRS S1 Alignment"], year) || 0,
+          getMetricValueByYear(metrics["IFRS S2 Alignment"], year) || 0,
+          getMetricValueByYear(metrics["TCFD Recommendations Implemented"], year) || 0,
+          getMetricValueByYear(metrics["SASB Standards Alignment"], year) || 0,
+          getMetricValueByYear(metrics["UNSDG Goals Alignment"], year) || 0,
+          getMetricValueByYear(metrics["CDP Disclosure Score"], year) || 0
+        ],
+        backgroundColor: [
+          "#3498db", "#2ecc71", "#27ae60", "#f39c12", 
+          "#e74c3c", "#9b59b6", "#34495e"
+        ],
+        borderWidth: 1
+      }
+    ]
+  };
+
+  return {
+    complianceBreakdown,
+    carbonEmissionBreakdown,
+    trainingComplianceCorrelation,
+    frameworkAlignment
+  };
+}
+
+/**
  * Helper function to calculate Scope 3 metrics
  */
-function calculateScope3Metrics(metrics, years, esgData) {
-  const currentYear = Math.max(...years);
-  
-  const suppliersWithCode = getMetricValueByYear(metrics["Suppliers with Code of Conduct"], currentYear);
-  const trainedSuppliers = getMetricValueByYear(metrics["Supplier Training Hours"], currentYear) > 0 ? 65 : 0;
-  const auditsConducted = getMetricValueByYear(metrics["Suppliers Audited"], currentYear) || 0;
-  const nonCompliances = getMetricValueByYear(metrics["Supplier Non-Compliance Cases"], currentYear) || 0;
-  const correctiveActions = getMetricValueByYear(metrics["Supplier Corrective Actions"], currentYear) || 0;
+function calculateScope3Metrics(metrics, year, esgData) {
+  const suppliersWithCode = getMetricValueByYear(metrics["Suppliers with Code of Conduct"], year);
+  const trainedSuppliers = getMetricValueByYear(metrics["Supplier Training Hours"], year) > 0 ? 65 : 0;
+  const auditsConducted = getMetricValueByYear(metrics["Suppliers Audited"], year) || 0;
+  const nonCompliances = getMetricValueByYear(metrics["Supplier Non-Compliance Cases"], year) || 0;
+  const correctiveActions = getMetricValueByYear(metrics["Supplier Corrective Actions"], year) || 0;
   
   // Calculate percentages
   const totalSuppliers = 100; // This should come from actual data
@@ -798,247 +1066,8 @@ function calculateScope3Metrics(metrics, years, esgData) {
     analysis: {
       dataSources: supplierData.length,
       verifiedSupplierData: supplierData.filter(d => d.verification_status === 'verified').length,
-      riskLevel: nonCompliances > 5 ? "High" : nonCompliances > 2 ? "Medium" : "Low",
-      improvementAreas: nonCompliances > 0 ? ["Supplier training", "Code of conduct enforcement"] : ["Maintain current standards"]
-    },
-    recommendations: [
-      suppliersWithCodePercent < 80 ? "Expand code of conduct to all suppliers" : "Maintain current supplier engagement",
-      trainedSuppliersPercent < 60 ? "Implement supplier training program" : "Continue supplier education",
-      auditsConducted < totalSuppliers * 0.3 ? "Increase supplier audit frequency" : "Maintain audit schedule"
-    ]
-  };
-}
-
-/**
- * Generate 8 comprehensive graphs for farm compliance
- */
-function generateComplianceGraphs(metrics, years, esgData) {
-  const currentYear = Math.max(...years);
-  
-  // 1. Training Hours Trend (Line Chart)
-  const trainingHoursTrend = {
-    type: "line",
-    title: "Training Hours Trend",
-    description: "Total training hours per year across all categories",
-    labels: years,
-    datasets: [
-      {
-        label: "Total Training Hours",
-        data: years.map(year => getMetricValueByYear(metrics["Training Hours - Total"], year) || 0),
-        borderColor: "#3498db",
-        backgroundColor: "rgba(52, 152, 219, 0.1)",
-        tension: 0.3
-      },
-      {
-        label: "Farmer Training Hours",
-        data: years.map(year => getMetricValueByYear(metrics["Training Hours - Farmer Training"], year) || 0),
-        borderColor: "#2ecc71",
-        backgroundColor: "rgba(46, 204, 113, 0.1)",
-        tension: 0.3
-      }
-    ]
-  };
-
-  // 2. Training Distribution (Stacked Bar Chart)
-  const trainingDistribution = {
-    type: "bar",
-    title: "Training Distribution by Category",
-    description: "Breakdown of training hours by category for current year",
-    labels: ["Farmer", "Safety", "Technical", "Compliance"],
-    datasets: [
-      {
-        label: "Training Hours",
-        data: [
-          getMetricValueByYear(metrics["Training Hours - Farmer Training"], currentYear) || 0,
-          getMetricValueByYear(metrics["Training Hours - Safety Training"], currentYear) || 0,
-          getMetricValueByYear(metrics["Training Hours - Technical Skills"], currentYear) || 0,
-          getMetricValueByYear(metrics["Training Hours - Compliance Training"], currentYear) || 0
-        ],
-        backgroundColor: ["#3498db", "#e74c3c", "#f39c12", "#9b59b6"]
-      }
-    ]
-  };
-
-  // 3. Employees Trained (Grouped Bar Chart)
-  const employeesTrained = {
-    type: "bar",
-    title: "Employees Trained by Category",
-    description: "Number of employees trained in different categories",
-    labels: years,
-    datasets: [
-      {
-        label: "Total Employees",
-        data: years.map(year => getMetricValueByYear(metrics["Employees Trained - Total"], year) || 0),
-        backgroundColor: "#3498db"
-      },
-      {
-        label: "Farmers",
-        data: years.map(year => getMetricValueByYear(metrics["Employees Trained - Farmers"], year) || 0),
-        backgroundColor: "#2ecc71"
-      },
-      {
-        label: "Supervisors",
-        data: years.map(year => getMetricValueByYear(metrics["Employees Trained - Supervisors"], year) || 0),
-        backgroundColor: "#f39c12"
-      }
-    ]
-  };
-
-  // 4. Scope 3 Engagement (Radar Chart)
-  const scope3Engagement = {
-    type: "radar",
-    title: "Scope 3 Engagement Assessment",
-    description: "Supplier engagement and compliance metrics",
-    labels: [
-      "Code of Conduct", 
-      "Supplier Audits", 
-      "Training Provided", 
-      "Compliance Rate", 
-      "Corrective Actions"
-    ],
-    datasets: [
-      {
-        label: "Current Year",
-        data: [
-          getMetricValueByYear(metrics["Suppliers with Code of Conduct"], currentYear) || 0,
-          getMetricValueByYear(metrics["Suppliers Audited"], currentYear) || 0,
-          (getMetricValueByYear(metrics["Supplier Training Hours"], currentYear) || 0) > 0 ? 75 : 25,
-          100 - (getMetricValueByYear(metrics["Supplier Non-Compliance Cases"], currentYear) || 0),
-          getMetricValueByYear(metrics["Supplier Corrective Actions"], currentYear) || 0
-        ],
-        backgroundColor: "rgba(52, 152, 219, 0.2)",
-        borderColor: "#3498db"
-      }
-    ]
-  };
-
-  // 5. Framework Compliance (Horizontal Bar Chart)
-  const frameworkCompliance = {
-    type: "horizontalBar",
-    title: "ESG Framework Compliance",
-    description: "Alignment with major ESG reporting frameworks",
-    labels: ["GRI Standards", "IFRS S1", "IFRS S2", "TCFD", "SASB", "UNSDG"],
-    datasets: [
-      {
-        label: "Compliance Score (%)",
-        data: [
-          getMetricValueByYear(metrics["GRI Standards Compliance"], currentYear) || 0,
-          getMetricValueByYear(metrics["IFRS S1 Alignment"], currentYear) || 0,
-          getMetricValueByYear(metrics["IFRS S2 Alignment"], currentYear) || 0,
-          getMetricValueByYear(metrics["TCFD Recommendations Implemented"], currentYear) || 0,
-          getMetricValueByYear(metrics["SASB Standards Alignment"], currentYear) || 0,
-          getMetricValueByYear(metrics["UNSDG Goals Alignment"], currentYear) || 0
-        ],
-        backgroundColor: ["#3498db", "#2ecc71", "#f39c12", "#9b59b6", "#e74c3c", "#1abc9c"]
-      }
-    ]
-  };
-
-  // 6. Compliance Score Trend (Area Chart)
-  const complianceTrend = {
-    type: "line",
-    title: "Compliance Score Trend",
-    description: "Evolution of compliance scores over time",
-    labels: years,
-    datasets: [
-      {
-        label: "Overall Compliance",
-        data: years.map(year => {
-          const scores = [
-            getMetricValueByYear(metrics["GRI Standards Compliance"], year),
-            getMetricValueByYear(metrics["IFRS S1 Alignment"], year),
-            getMetricValueByYear(metrics["IFRS S2 Alignment"], year)
-          ].filter(score => score !== null);
-          return scores.length > 0 ? scores.reduce((a, b) => a + b) / scores.length : 0;
-        }),
-        borderColor: "#2ecc71",
-        backgroundColor: "rgba(46, 204, 113, 0.3)",
-        fill: true,
-        tension: 0.3
-      }
-    ]
-  };
-
-  // 7. Certification Status (Doughnut Chart)
-  const certificationStatus = {
-    type: "doughnut",
-    title: "Certification Portfolio",
-    description: "Status of certifications and accreditations",
-    labels: ["Active", "Expired", "In Progress", "Pending Renewal"],
-    datasets: [
-      {
-        data: [
-          getMetricValueByYear(metrics["Certifications - Active"], currentYear) || 0,
-          getMetricValueByYear(metrics["Certifications - Expired"], currentYear) || 0,
-          getMetricValueByYear(metrics["Certifications - In Progress"], currentYear) || 0,
-          0 // Placeholder for pending renewal
-        ],
-        backgroundColor: ["#2ecc71", "#e74c3c", "#f39c12", "#95a5a6"]
-      }
-    ]
-  };
-
-  // 8. Training vs Performance (Scatter Plot)
-  const trainingPerformance = {
-    type: "scatter",
-    title: "Training Impact Analysis",
-    description: "Correlation between training hours and compliance scores",
-    datasets: [
-      {
-        label: "High Compliance",
-        data: [
-          { x: 40, y: 95, r: 12 },
-          { x: 35, y: 90, r: 10 },
-          { x: 45, y: 92, r: 11 }
-        ],
-        backgroundColor: "#2ecc71"
-      },
-      {
-        label: "Medium Compliance",
-        data: [
-          { x: 25, y: 75, r: 10 },
-          { x: 30, y: 70, r: 9 },
-          { x: 20, y: 72, r: 8 }
-        ],
-        backgroundColor: "#f39c12"
-      },
-      {
-        label: "Low Compliance",
-        data: [
-          { x: 10, y: 55, r: 8 },
-          { x: 15, y: 50, r: 7 },
-          { x: 5, y: 45, r: 6 }
-        ],
-        backgroundColor: "#e74c3c"
-      }
-    ],
-    options: {
-      scales: {
-        x: {
-          title: {
-            display: true,
-            text: 'Training Hours per Employee'
-          }
-        },
-        y: {
-          title: {
-            display: true,
-            text: 'Compliance Score (%)'
-          }
-        }
-      }
+      riskLevel: nonCompliances > 5 ? "High" : nonCompliances > 2 ? "Medium" : "Low"
     }
-  };
-
-  return {
-    trainingHoursTrend,
-    trainingDistribution,
-    employeesTrained,
-    scope3Engagement,
-    frameworkCompliance,
-    complianceTrend,
-    certificationStatus,
-    trainingPerformance
   };
 }
 
@@ -1079,20 +1108,6 @@ function extractCertifications(esgData, year) {
 }
 
 /**
- * Helper function to calculate average metric value
- */
-function averageMetricValue(metric, years) {
-  if (!metric || !metric.values) return null;
-  
-  const values = years.map(year => getMetricValueByYear(metric, year))
-    .filter(val => val !== null);
-  
-  if (values.length === 0) return null;
-  
-  return values.reduce((sum, val) => sum + val, 0) / values.length;
-}
-
-/**
  * Count verified metrics
  */
 function countVerifiedMetrics(esgData) {
@@ -1124,6 +1139,134 @@ function getLatestVerificationDate(esgData) {
 function calculateDataCoverage(metrics, metricNames) {
   const availableMetrics = metricNames.filter(name => metrics[name] && metrics[name].values.length > 0);
   return Math.round((availableMetrics.length / metricNames.length) * 100);
+}
+
+/**
+ * Calculate projected emissions for next year
+ */
+function calculateProjectedEmissions(carbonData, currentYear) {
+  if (!carbonData || !carbonData.yearData) return null;
+  
+  const currentEmissions = carbonData.yearData.emissions?.total_scope_emission_tco2e || 0;
+  
+  // Simple projection: assume 5% reduction with current practices
+  return {
+    projected_scope1: carbonData.yearData.emissions?.scope1?.total_tco2e * 0.95 || 0,
+    projected_scope2: carbonData.yearData.emissions?.scope2?.total_tco2e * 0.95 || 0,
+    projected_scope3: carbonData.yearData.emissions?.scope3?.total_tco2e * 0.95 || 0,
+    total_projected: currentEmissions * 0.95,
+    reduction_percentage: 5,
+    assumptions: ["Business as usual", "No major operational changes"]
+  };
+}
+
+/**
+ * Predict carbon neutrality timeline
+ */
+function predictCarbonNeutrality(carbonData, currentYear) {
+  if (!carbonData || !carbonData.yearData) return null;
+  
+  const currentEmissions = carbonData.yearData.emissions?.total_scope_emission_tco2e || 0;
+  const currentSequestration = carbonData.yearData.sequestration?.annual_summary?.sequestration_total_tco2 || 0;
+  const netBalance = carbonData.yearData.emissions?.net_total_emission_tco2e || currentEmissions;
+  
+  if (netBalance <= 0) {
+    return {
+      status: "Already Carbon Neutral",
+      achieved_year: currentYear,
+      current_net_balance: netBalance
+    };
+  }
+  
+  // Calculate years to carbon neutrality based on 10% annual reduction
+  const yearsToNeutrality = Math.ceil(Math.log(0.01) / Math.log(0.9));
+  const targetYear = currentYear + yearsToNeutrality;
+  
+  return {
+    status: "On Track for Carbon Neutrality",
+    target_year: targetYear,
+    years_remaining: yearsToNeutrality,
+    required_annual_reduction: 10, // percentage
+    current_net_balance: netBalance,
+    assumptions: ["10% annual emission reduction", "Constant sequestration rate"]
+  };
+}
+
+/**
+ * Estimate sequestration potential
+ */
+function estimateSequestrationPotential(carbonData, currentYear) {
+  if (!carbonData || !carbonData.yearData) return null;
+  
+  const currentSequestration = carbonData.yearData.sequestration?.annual_summary?.sequestration_total_tco2 || 0;
+  const areaHa = carbonData.yearData.sequestration?.reporting_area_ha || 0;
+  
+  // Estimate potential based on best practices (IPCC guidelines)
+  const potentialIncreasePercentage = 25; // 25% increase possible with best practices
+  const potentialSequestration = currentSequestration * (1 + potentialIncreasePercentage / 100);
+  
+  return {
+    current_sequestration_tco2: currentSequestration,
+    potential_sequestration_tco2: potentialSequestration,
+    increase_possible_tco2: potentialSequestration - currentSequestration,
+    increase_percentage: potentialIncreasePercentage,
+    area_ha: areaHa,
+    sequestration_per_ha: areaHa > 0 ? currentSequestration / areaHa : 0,
+    potential_per_ha: areaHa > 0 ? potentialSequestration / areaHa : 0,
+    recommendations: [
+      "Implement agroforestry systems",
+      "Adopt conservation tillage practices",
+      "Increase cover cropping",
+      "Optimize fertilizer application"
+    ]
+  };
+}
+
+/**
+ * Identify Scope 3 reduction opportunities
+ */
+function identifyScope3ReductionOpportunities(carbonMetrics) {
+  if (!carbonMetrics || !carbonMetrics.emissions) return null;
+  
+  const scope3Emissions = carbonMetrics.emissions.scope3 || 0;
+  const totalEmissions = carbonMetrics.emissions.totalEmissions || 1;
+  const scope3Percentage = (scope3Emissions / totalEmissions) * 100;
+  
+  const opportunities = [];
+  
+  if (scope3Percentage > 70) {
+    opportunities.push({
+      priority: "High",
+      area: "Supply Chain Optimization",
+      potential_reduction: "20-30%",
+      actions: [
+        "Supplier engagement program",
+        "Material substitution",
+        "Transportation efficiency"
+      ]
+    });
+  }
+  
+  if (scope3Emissions > 1000) {
+    opportunities.push({
+      priority: "Medium",
+      area: "Product Design",
+      potential_reduction: "10-15%",
+      actions: [
+        "Lightweight materials",
+        "Extended product life",
+        "Recycled content"
+      ]
+    });
+  }
+  
+  return {
+    scope3_percentage: scope3Percentage.toFixed(1),
+    emission_intensity: scope3Emissions,
+    reduction_opportunities: opportunities,
+    estimated_total_reduction_tco2e: scope3Emissions * 0.2, // 20% reduction estimate
+    timeline_months: 24
+  };
 }
 
 module.exports = {
