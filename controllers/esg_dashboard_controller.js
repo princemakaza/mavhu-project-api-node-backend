@@ -7,9 +7,13 @@ const GHGEmissionsData = require("../services/GHGEmissions_service");
 const BiodiversityLanduseData = require("../services/biodiversity_landuse_service");
 const IrrigationWaterRiskData = require("../services/irrigation_water_service");
 const FarmComplianceData = require("../services/farm_compliance_service");
-
-
-
+const EnergyConsumptionData = require("../services/energy_consumption_service");
+const WasteManagementData = require("../services/waste_management_service");
+const WorkforceDiversityData = require("../services/workforce_and_diversity_service");
+const HealthSafetyData = require("../services/health_and_safety_service");
+const GovernanceBoardData = require("../services/governance_and_board_service");
+const CommunityEngagementData = require("../services/community_engagement_service");
+const OverallESGScoreData = require("../services/overal_esg_service");
 /**
  * 1. Soil Health & Carbon Quality API
  * GET /api/v1/esg-dashboard/soil-health-carbon/:companyId
@@ -138,7 +142,7 @@ const getEnergyRenewables = asyncHandler(async (req, res) => {
   const { companyId } = req.params;
   const { year } = req.query;
 
-  const data = await esgDashboardService.getEnergyRenewablesData(
+  const data = await EnergyConsumptionData.getEnergyRenewablesData(
     companyId,
     year ? parseInt(year) : null
   );
@@ -158,7 +162,7 @@ const getWasteManagement = asyncHandler(async (req, res) => {
   const { companyId } = req.params;
   const { year } = req.query;
 
-  const data = await esgDashboardService.getWasteManagementData(
+  const data = await WasteManagementData.getWasteManagementData(
     companyId,
     year ? parseInt(year) : null
   );
@@ -178,7 +182,7 @@ const getWorkforceDiversity = asyncHandler(async (req, res) => {
   const { companyId } = req.params;
   const { year } = req.query;
 
-  const data = await esgDashboardService.getWorkforceDiversityData(
+  const data = await WorkforceDiversityData.getWorkforceDiversityData(
     companyId,
     year ? parseInt(year) : null
   );
@@ -198,7 +202,7 @@ const getHealthSafety = asyncHandler(async (req, res) => {
   const { companyId } = req.params;
   const { year } = req.query;
 
-  const data = await esgDashboardService.getHealthSafetyData(
+  const data = await HealthSafetyData.getHealthSafetyData(
     companyId,
     year ? parseInt(year) : null
   );
@@ -218,7 +222,7 @@ const getGovernanceBoard = asyncHandler(async (req, res) => {
   const { companyId } = req.params;
   const { year } = req.query;
 
-  const data = await esgDashboardService.getGovernanceBoardData(
+  const data = await GovernanceBoardData.getGovernanceBoardData(
     companyId,
     year ? parseInt(year) : null
   );
@@ -238,7 +242,7 @@ const getCommunityEngagement = asyncHandler(async (req, res) => {
   const { companyId } = req.params;
   const { year } = req.query;
 
-  const data = await esgDashboardService.getCommunityEngagementData(
+  const data = await CommunityEngagementData.getCommunityEngagementData(
     companyId,
     year ? parseInt(year) : null
   );
@@ -258,7 +262,7 @@ const getOverallESGScore = asyncHandler(async (req, res) => {
   const { companyId } = req.params;
   const { year } = req.query;
 
-  const data = await esgDashboardService.getOverallESGScoreData(
+  const data = await OverallESGScoreData.getOverallESGScoreData(
     companyId,
     year ? parseInt(year) : null
   );
