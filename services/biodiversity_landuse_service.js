@@ -15,7 +15,6 @@ function getMetricValueByYear(metric, year) {
     return null;
 
   const entry = metric.yearly_data.find((yd) => {
-    // Match both fiscal year string (FY25) and numeric year (2025)
     const yearStr = yd.year?.toString() || "";
     return (
       yearStr.includes(year) ||
@@ -25,7 +24,6 @@ function getMetricValueByYear(metric, year) {
 
   if (!entry) return null;
 
-  // Return numeric_value if available, else parse value
   if (entry.numeric_value !== undefined && entry.numeric_value !== null) {
     return entry.numeric_value;
   }
@@ -105,7 +103,6 @@ function groupMetricsByCategory(metrics) {
     if (grouped[metric.category]) {
       grouped[metric.category].push(metric);
     } else {
-      // fallback: push to summary
       grouped.summary.push(metric);
     }
   });
@@ -282,7 +279,7 @@ function calculateKeyStatistics(metrics, currentYear) {
       if (name.includes("restored area") || name.includes("rehabilitated"))
         stats.total_restored_area += value;
       if (name.includes("trees planted")) {
-        stats.trees_planted_cumulative += value; // if yearly, we'd sum; but assume cumulative
+        stats.trees_planted_cumulative += value;
       }
     }
     if (metric.category === "biodiversity_flora") {
@@ -304,6 +301,58 @@ function calculateKeyStatistics(metrics, currentYear) {
 }
 
 /**
+ * Helper: Build a flat year-indexed data view across all metrics.
+ * Returns an object keyed by year, each containing all metric values for that year.
+ */
+function buildYearlyBreakdown(metrics, years) {
+  const breakdown = {};
+
+  years.forEach((year) => {
+    breakdown[year] = {
+      year,
+      metrics: {},
+    };
+
+    metrics.forEach((metric) => {
+      const yearlyEntry = metric.yearly_data?.find((yd) => {
+        const yearStr = yd.year?.toString() || "";
+        return (
+          yearStr.includes(year) ||
+          (yd.fiscal_year && yd.fiscal_year.toString() === year.toString())
+        );
+      });
+
+      if (yearlyEntry) {
+        const key = `${metric.category}__${metric.metric_name}`;
+        breakdown[year].metrics[key] = {
+          category: metric.category,
+          subcategory: metric.subcategory || null,
+          metric_name: metric.metric_name,
+          description: metric.description || null,
+          // Raw year entry (fully populated with added_by / last_updated_by)
+          year_label: yearlyEntry.year,
+          fiscal_year: yearlyEntry.fiscal_year || null,
+          value: yearlyEntry.value,
+          numeric_value:
+            yearlyEntry.numeric_value !== undefined
+              ? yearlyEntry.numeric_value
+              : null,
+          unit: yearlyEntry.unit || null,
+          source: yearlyEntry.source || null,
+          notes: yearlyEntry.notes || null,
+          added_by: yearlyEntry.added_by || null,
+          added_at: yearlyEntry.added_at || null,
+          last_updated_by: yearlyEntry.last_updated_by || null,
+          last_updated_at: yearlyEntry.last_updated_at || null,
+        };
+      }
+    });
+  });
+
+  return breakdown;
+}
+
+/**
  * Main function: Get Biodiversity & Land Use Integrity data from dedicated model
  */
 async function getBiodiversityLandUseData(
@@ -322,18 +371,33 @@ async function getBiodiversityLandUseData(
       );
     }
 
-    // Fetch the most recent active biodiversity record for the company
+    // -----------------------------------------------------------------------
+    // Fetch the most recent active biodiversity record for the company.
+    // Populate ALL nested ObjectId references so the raw document is fully
+    // resolved before we hand it back to the caller.
+    // -----------------------------------------------------------------------
     const biodiversityRecord = await BiodiversityLandUse.findOne({
       company: companyId,
       is_active: true,
     })
-      .populate("company") // ✅ Populate entire company document (no field restrictions)
+      // Top-level refs
+      .populate("company") // full Company document
       .populate("created_by", "name email")
       .populate("last_updated_by", "name email")
       .populate("verified_by", "name email")
+      .populate("deleted_by", "name email")
+      .populate("previous_version") // full previous BiodiversityLandUse doc
+
+      // Metric-level refs
       .populate("metrics.created_by", "name email")
+
+      // YearlyData refs (nested inside metrics)
       .populate("metrics.yearly_data.added_by", "name email")
       .populate("metrics.yearly_data.last_updated_by", "name email")
+
+      // SingleValue nested ref
+      .populate("metrics.single_value.added_by", "name email")
+
       .lean();
 
     if (!biodiversityRecord) {
@@ -344,14 +408,21 @@ async function getBiodiversityLandUseData(
       );
     }
 
-    // Company is already populated, but for safety we also fetch from Company model if needed
+    // Company is already populated via .populate("company"), but fall back to a
+    // direct lookup if the populate somehow returned only the ObjectId.
     const company =
-      biodiversityRecord.company || (await Company.findById(companyId).lean());
+      biodiversityRecord.company &&
+      typeof biodiversityRecord.company === "object"
+        ? biodiversityRecord.company
+        : await Company.findById(companyId).lean();
+
     if (!company) {
       throw new AppError("Company not found", 404, "COMPANY_NOT_FOUND");
     }
 
+    // -----------------------------------------------------------------------
     // Determine target years for filtering
+    // -----------------------------------------------------------------------
     let targetYears = [];
     if (year) {
       targetYears = [year];
@@ -362,10 +433,10 @@ async function getBiodiversityLandUseData(
       );
     }
 
-    // Use all metrics from the record (they are already biodiversity/land use focused)
+    // Use all metrics from the record
     let metrics = biodiversityRecord.metrics || [];
 
-    // Filter metrics to only include those with data in target years (optional, but can be done)
+    // Filter metrics to only those with data in target years
     if (targetYears.length > 0) {
       metrics = metrics.filter((metric) => {
         if (!metric.yearly_data) return false;
@@ -400,12 +471,17 @@ async function getBiodiversityLandUseData(
     // Generate graphs
     const graphs = generateGraphs(metrics, years);
 
+    // Build flat year-by-year breakdown (new: one entry per year)
+    const yearlyBreakdown = buildYearlyBreakdown(metrics, years);
+
+    // -----------------------------------------------------------------------
     // Build response
+    // -----------------------------------------------------------------------
     const response = {
       metadata: {
         api_version: API_VERSION,
         calculation_version: CALCULATION_VERSION,
-        gee_adapter_version: GEE_ADAPTER_VERSION, // ✅ New version constant added
+        gee_adapter_version: GEE_ADAPTER_VERSION,
         generated_at: new Date().toISOString(),
         endpoint: "biodiversity_land_use",
         company_id: companyId,
@@ -415,7 +491,7 @@ async function getBiodiversityLandUseData(
         record_version: biodiversityRecord.version,
       },
 
-      // ✅ Full company object (all fields) – now correctly populated
+      // Full company object (all fields – fully populated)
       company: company,
 
       reporting_period: {
@@ -428,11 +504,20 @@ async function getBiodiversityLandUseData(
         data_completeness: `${metrics.length} metrics available`,
       },
 
+      // -----------------------------------------------------------------------
+      // NEW: Flat year-indexed breakdown of every metric value
+      // Each key is a fiscal year (e.g. 2025); the value contains all metric
+      // readings for that year with full populated user refs.
+      // -----------------------------------------------------------------------
+      yearly_data_by_year: yearlyBreakdown,
+
       // Original source and import information
       source_information: {
         original_source: biodiversityRecord.original_source,
         source_files: biodiversityRecord.source_files,
         import_source: biodiversityRecord.import_source,
+        source_file_name: biodiversityRecord.source_file_name,
+        source_file_metadata: biodiversityRecord.source_file_metadata,
         import_batch_id: biodiversityRecord.import_batch_id,
         import_date: biodiversityRecord.import_date,
         import_notes: biodiversityRecord.import_notes,
@@ -447,19 +532,23 @@ async function getBiodiversityLandUseData(
         verification_notes: biodiversityRecord.verification_notes,
         validation_status: biodiversityRecord.validation_status,
         validation_errors: biodiversityRecord.validation_errors,
+        validation_notes: biodiversityRecord.validation_notes,
       },
 
-      // Summary statistics (pre-calculated from model or computed on the fly)
+      // Summary statistics
       summary_statistics: {
         ...biodiversityRecord.summary_stats,
-        ...keyStats, // override with fresh calculations
+        ...keyStats, // fresh calculations override stored stats
       },
 
       // GRI references
       gri_references: biodiversityRecord.gri_references || [],
 
-      // Metrics grouped by category (full details)
+      // Metrics grouped by category (full details, all refs populated)
       metrics_by_category: groupedMetrics,
+
+      // All raw metrics (flat array, all refs populated)
+      all_metrics: metrics,
 
       // Graphs and visualizations
       graphs: graphs,
@@ -476,14 +565,17 @@ async function getBiodiversityLandUseData(
         human_wildlife_conflicts: keyStats.human_wildlife_conflicts,
       },
 
-      // Audit trail
+      // Audit trail (all refs populated)
       audit: {
         created_at: biodiversityRecord.created_at,
         created_by: biodiversityRecord.created_by,
         last_updated_at: biodiversityRecord.last_updated_at,
         last_updated_by: biodiversityRecord.last_updated_by,
         version: biodiversityRecord.version,
-        previous_version: biodiversityRecord.previous_version,
+        previous_version: biodiversityRecord.previous_version, // fully populated doc
+        deleted_at: biodiversityRecord.deleted_at,
+        deleted_by: biodiversityRecord.deleted_by,
+        is_active: biodiversityRecord.is_active,
       },
     };
 
