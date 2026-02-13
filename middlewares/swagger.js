@@ -793,6 +793,596 @@ const options = {
             },
           },
         },
+        BiodiversityLandUse: {
+          type: "object",
+          description:
+            "Biodiversity and Land Use data model containing all conservation, agricultural, species, and habitat metrics organized by category",
+          required: ["company", "created_by"],
+          properties: {
+            _id: {
+              type: "string",
+              example: "652a1b2c3d4e5f6a7b8c9d0e",
+              description:
+                "Unique identifier for the biodiversity and land use record",
+            },
+            company: {
+              type: "string",
+              example: "507f1f77bcf86cd799439011",
+              description:
+                "Reference to the Company this biodiversity data belongs to",
+            },
+
+            // Data Coverage Period
+            data_period_start: {
+              type: "string",
+              example: "FY22",
+              description:
+                "Start of the data coverage period (e.g. 'FY22' or '31.03.2022')",
+            },
+            data_period_end: {
+              type: "string",
+              example: "FY25",
+              description:
+                "End of the data coverage period (e.g. 'FY25' or '31.03.2025')",
+            },
+
+            // Source Information
+            original_source: {
+              type: "string",
+              example: "HVE Integrated Report 2025",
+              description: "Human-readable name of the original data source",
+            },
+            source_files: {
+              type: "array",
+              description:
+                "List of source documents from which data was extracted",
+              items: {
+                type: "object",
+                properties: {
+                  name: {
+                    type: "string",
+                    example: "HVE Integrated Report 2025",
+                  },
+                  year: {
+                    type: "string",
+                    example: "2025",
+                  },
+                  pages: {
+                    type: "string",
+                    example: "p.15, p.44, p.120",
+                  },
+                  type: {
+                    type: "string",
+                    enum: [
+                      "annual_report",
+                      "integrated_report",
+                      "sustainability_report",
+                      "other",
+                    ],
+                    example: "integrated_report",
+                  },
+                },
+              },
+            },
+
+            // Import Tracking
+            import_source: {
+              type: "string",
+              enum: ["csv", "excel", "manual", "api", "pdf_extraction"],
+              example: "json",
+              description: "Method or format through which data was imported",
+            },
+            source_file_name: {
+              type: "string",
+              example: "HVE_Biodiversity_Land_Use_Data.csv",
+              description: "Name of the source file used in the import",
+            },
+            source_file_metadata: {
+              type: "object",
+              description:
+                "Arbitrary metadata attached to the source file (free-form)",
+              example: { sheet: "Biodiversity & Land Use Data", rows: 74 },
+            },
+            import_batch_id: {
+              type: "string",
+              example: "json_import_1716000000000_a1b2c3d4e",
+              description: "Unique batch identifier generated at import time",
+            },
+            import_date: {
+              type: "string",
+              format: "date-time",
+              example: "2025-05-18T08:00:00.000Z",
+              description: "Timestamp when data was imported",
+            },
+            import_notes: {
+              type: "string",
+              example:
+                "Converted from HVE Biodiversity & Land Use CSV. Annual Reports 2022–2025.",
+              description: "Free-text notes recorded at import time",
+            },
+
+            // Data Quality & Verification
+            data_quality_score: {
+              type: "number",
+              minimum: 0,
+              maximum: 100,
+              nullable: true,
+              example: 85,
+              description:
+                "Quality score from 0–100 assigned to this data record",
+            },
+            verification_status: {
+              type: "string",
+              enum: [
+                "unverified",
+                "pending_review",
+                "verified",
+                "audited",
+                "disputed",
+              ],
+              example: "unverified",
+              description: "Current verification state of the record",
+            },
+            verified_by: {
+              type: "string",
+              example: "507f1f77bcf86cd799439012",
+              description: "User ID of the person who verified the record",
+            },
+            verified_at: {
+              type: "string",
+              format: "date-time",
+              example: "2025-05-20T09:00:00.000Z",
+              description: "Timestamp when the record was verified",
+            },
+            verification_notes: {
+              type: "string",
+              example: "Cross-checked against published integrated report PDF.",
+              description: "Notes left by the verifier",
+            },
+
+            // Data Validation
+            validation_status: {
+              type: "string",
+              enum: [
+                "not_validated",
+                "validating",
+                "validated",
+                "failed_validation",
+              ],
+              example: "not_validated",
+              description: "Current state of automated data validation",
+            },
+            validation_errors: {
+              type: "array",
+              description: "List of validation errors found during processing",
+              items: {
+                type: "object",
+                properties: {
+                  metric_name: {
+                    type: "string",
+                    example: "Area Under Cane",
+                  },
+                  year: {
+                    type: "string",
+                    example: "FY25",
+                  },
+                  error_message: {
+                    type: "string",
+                    example:
+                      "Numeric value could not be parsed from source string",
+                  },
+                  field: {
+                    type: "string",
+                    example: "numeric_value",
+                  },
+                  severity: {
+                    type: "string",
+                    enum: ["warning", "error", "critical"],
+                    example: "warning",
+                  },
+                },
+              },
+            },
+            validation_notes: {
+              type: "string",
+              example: "Minor unit inconsistency in LPG rows — kg vs tonnes.",
+              description: "Free-text notes on overall validation outcome",
+            },
+
+            // Metrics
+            metrics: {
+              type: "array",
+              description:
+                "All biodiversity and land use metrics organised by category",
+              items: {
+                $ref: "#/components/schemas/BiodiversityMetric",
+              },
+            },
+
+            // Summary Statistics
+            summary_stats: {
+              type: "object",
+              description:
+                "Auto-calculated or manually set aggregate figures across all metrics",
+              properties: {
+                total_conservation_area: {
+                  type: "number",
+                  example: 14158,
+                  description:
+                    "Total conservation/protected habitat area in hectares",
+                },
+                total_agricultural_area: {
+                  type: "number",
+                  example: 10636,
+                  description: "Total agricultural land area in hectares",
+                },
+                total_surveyed_area: {
+                  type: "number",
+                  example: 17644,
+                  description: "Total formally surveyed land area in hectares",
+                },
+                total_trees_planted: {
+                  type: "number",
+                  example: 22200,
+                  description: "Cumulative or latest-year trees planted",
+                },
+                total_lpg_distributed: {
+                  type: "number",
+                  example: 141408,
+                  description:
+                    "Total LPG distributed in kg (latest reporting year)",
+                },
+                flora_species_count: {
+                  type: "number",
+                  example: 130,
+                  description: "Total number of recorded plant species",
+                },
+                fauna_species_count: {
+                  type: "number",
+                  example: 124,
+                  description:
+                    "Total number of recorded animal species (mammals + birds + fish etc.)",
+                },
+                last_updated: {
+                  type: "string",
+                  format: "date-time",
+                  example: "2025-05-18T08:00:00.000Z",
+                  description:
+                    "Timestamp when summary stats were last recalculated",
+                },
+              },
+            },
+
+            // GRI References
+            gri_references: {
+              type: "array",
+              description:
+                "GRI Standards compliance tracking entries linked to specific metrics",
+              items: {
+                type: "object",
+                properties: {
+                  standard: {
+                    type: "string",
+                    example: "GRI 304-4",
+                    description:
+                      "GRI standard identifier (e.g. 'GRI 304-4', 'GRI 101-7')",
+                  },
+                  metric_name: {
+                    type: "string",
+                    example: "Flora and Fauna Species Data",
+                    description:
+                      "Name of the metric this GRI reference applies to",
+                  },
+                  compliance_status: {
+                    type: "string",
+                    enum: [
+                      "compliant",
+                      "partially_compliant",
+                      "non_compliant",
+                      "not_applicable",
+                    ],
+                    example: "partially_compliant",
+                  },
+                  reporting_year: {
+                    type: "string",
+                    example: "FY25",
+                  },
+                },
+              },
+            },
+
+            // Audit Trail
+            created_at: {
+              type: "string",
+              format: "date-time",
+              example: "2025-05-18T08:00:00.000Z",
+            },
+            created_by: {
+              type: "string",
+              example: "507f1f77bcf86cd799439012",
+              description: "User ID who created the record",
+            },
+            last_updated_at: {
+              type: "string",
+              format: "date-time",
+              example: "2025-05-18T08:00:00.000Z",
+            },
+            last_updated_by: {
+              type: "string",
+              example: "507f1f77bcf86cd799439012",
+              description: "User ID who last updated the record",
+            },
+
+            // Versioning
+            version: {
+              type: "number",
+              example: 1,
+              description:
+                "Incremental version number; increases on each import/update cycle",
+            },
+            previous_version: {
+              type: "string",
+              example: "652a1b2c3d4e5f6a7b8c9d0d",
+              description:
+                "Reference to the prior version of this record (if any)",
+            },
+
+            // Soft Delete
+            is_active: {
+              type: "boolean",
+              example: true,
+              description: "False when the record has been soft-deleted",
+            },
+            deleted_at: {
+              type: "string",
+              format: "date-time",
+              example: "2025-06-01T12:00:00.000Z",
+              description: "Timestamp of soft deletion (null when active)",
+            },
+            deleted_by: {
+              type: "string",
+              example: "507f1f77bcf86cd799439012",
+              description: "User ID who soft-deleted the record",
+            },
+          },
+        },
+
+        // ─── Sub-schemas ──────────────────────────────────────────────────────────────
+
+        BiodiversityMetric: {
+          type: "object",
+          description:
+            "A single biodiversity or land use metric, grouped by category",
+          required: ["category", "metric_name", "created_by"],
+          properties: {
+            category: {
+              type: "string",
+              enum: [
+                "agricultural_land",
+                "conservation_protected_habitat",
+                "land_tenure",
+                "restoration_deforestation",
+                "fuelwood_substitution",
+                "biodiversity_flora",
+                "biodiversity_fauna",
+                "human_wildlife_conflict",
+                "summary",
+              ],
+              example: "agricultural_land",
+              description: "Top-level category this metric belongs to",
+            },
+            subcategory: {
+              type: "string",
+              example: "cane",
+              description:
+                "Optional subcategory (e.g. 'cane', 'orchards', 'mammals', 'birds')",
+            },
+            metric_name: {
+              type: "string",
+              example: "Area Under Cane",
+              description: "Human-readable name of the metric",
+            },
+            description: {
+              type: "string",
+              example:
+                "Annual trend of area under sugarcane cultivation in hectares",
+            },
+            data_type: {
+              type: "string",
+              enum: ["yearly_series", "single_value", "list", "summary"],
+              example: "yearly_series",
+              description:
+                "Determines which data field is populated for this metric",
+            },
+            yearly_data: {
+              type: "array",
+              description:
+                "Time-series data points — populated when data_type is 'yearly_series'",
+              items: {
+                $ref: "#/components/schemas/YearlyBiodiversityData",
+              },
+            },
+            single_value: {
+              type: "object",
+              description:
+                "Single point-in-time value — populated when data_type is 'single_value'",
+              properties: {
+                value: {
+                  example: "16,802 ha",
+                  description: "Raw value (string or number)",
+                },
+                numeric_value: {
+                  type: "number",
+                  example: 16802,
+                },
+                unit: {
+                  type: "string",
+                  example: "ha",
+                },
+                source: {
+                  type: "string",
+                  example: "Annual Report 2024, PDF p.45",
+                },
+                notes: {
+                  type: "string",
+                  example: "Approximately 95% of total surveyed area",
+                },
+                as_of_date: {
+                  type: "string",
+                  format: "date-time",
+                  example: "2024-03-31T00:00:00.000Z",
+                },
+                added_by: {
+                  type: "string",
+                  example: "507f1f77bcf86cd799439012",
+                },
+                added_at: {
+                  type: "string",
+                  format: "date-time",
+                  example: "2025-05-18T08:00:00.000Z",
+                },
+              },
+            },
+            list_data: {
+              type: "array",
+              description:
+                "Inventory-style list — populated when data_type is 'list'",
+              items: {
+                type: "object",
+                properties: {
+                  item: {
+                    type: "string",
+                    example: "Plant species recorded",
+                  },
+                  count: {
+                    type: "number",
+                    example: 130,
+                  },
+                  details: {
+                    type: "string",
+                    example: "Includes Mopane woodland and others",
+                  },
+                  source: {
+                    type: "string",
+                    example: "Annual Report 2023, PDF p.15",
+                  },
+                  added_at: {
+                    type: "string",
+                    format: "date-time",
+                    example: "2025-05-18T08:00:00.000Z",
+                  },
+                },
+              },
+            },
+            summary_value: {
+              type: "object",
+              description:
+                "Summary / KPI snapshot — populated when data_type is 'summary'",
+              properties: {
+                key_metric: {
+                  type: "string",
+                  example: "Area under cane",
+                },
+                latest_value: {
+                  example: "10,625 ha (FY25)",
+                  description: "Latest known value (string or number)",
+                },
+                trend: {
+                  type: "string",
+                  example: "↓ from 10,916 ha (FY22)",
+                },
+                notes: {
+                  type: "string",
+                  example: "Slight decline over four-year reporting period",
+                },
+                as_of_date: {
+                  type: "string",
+                  format: "date-time",
+                  example: "2025-03-31T00:00:00.000Z",
+                },
+              },
+            },
+            is_active: {
+              type: "boolean",
+              example: true,
+            },
+            created_at: {
+              type: "string",
+              format: "date-time",
+              example: "2025-05-18T08:00:00.000Z",
+            },
+            created_by: {
+              type: "string",
+              example: "507f1f77bcf86cd799439012",
+              description: "User ID who created this metric entry",
+            },
+          },
+        },
+
+        YearlyBiodiversityData: {
+          type: "object",
+          description:
+            "A single year's data point within a yearly_series biodiversity metric",
+          required: ["year", "source", "added_by"],
+          properties: {
+            year: {
+              type: "string",
+              example: "31.03.2025 (FY25)",
+              description: "Year label as it appears in the source document",
+            },
+            fiscal_year: {
+              type: "number",
+              example: 2025,
+              description: "Numeric fiscal year extracted from the year label",
+            },
+            value: {
+              example: 10625,
+              description:
+                "Raw value — may be a string, number, or nested object",
+            },
+            numeric_value: {
+              type: "number",
+              example: 10625,
+              description: "Numeric representation of value (if parseable)",
+            },
+            unit: {
+              type: "string",
+              example: "ha",
+              description:
+                "Unit of measurement (e.g. 'ha', 'kg', 'trees', 'km')",
+            },
+            source: {
+              type: "string",
+              example: "HVE Integrated Report 2025, PDF p.120",
+              description: "Original source citation for this data point",
+            },
+            notes: {
+              type: "string",
+              example: "FY26 target: 30,000 trees",
+              description: "Additional context or caveats",
+            },
+            added_by: {
+              type: "string",
+              example: "507f1f77bcf86cd799439012",
+              description: "User ID who added this data point",
+            },
+            added_at: {
+              type: "string",
+              format: "date-time",
+              example: "2025-05-18T08:00:00.000Z",
+            },
+            last_updated_by: {
+              type: "string",
+              example: "507f1f77bcf86cd799439012",
+              description: "User ID who last updated this data point",
+            },
+            last_updated_at: {
+              type: "string",
+              format: "date-time",
+              example: "2025-05-18T08:00:00.000Z",
+            },
+          },
+        },
 
         SequestrationMonthly: {
           type: "object",
@@ -1934,6 +2524,8 @@ const options = {
     "./routers/esg_data_router.js", // adjust path if needed
     "./routers/esg_dashboard_router.js", // adjust path if needed
     "./routers/carbon_emission_router.js", // adjust path if needed
+    "./routers/biodiversity_data_router.js", // adjust path if needed
+    "./routers/crop_yield_router.js", // adjust path if needed
   ],
 };
 

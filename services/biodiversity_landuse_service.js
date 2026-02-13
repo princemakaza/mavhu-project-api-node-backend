@@ -1,6 +1,5 @@
-const ESGData = require("../models/esg_data_model");
+const BiodiversityLandUse = require("../models/biodiversity_and_landuse_model");
 const Company = require("../models/company_model");
-const CarbonEmissionAccounting = require("../models/carbon_emission_accounting_model");
 const AppError = require("../utils/app_error");
 
 // Version constants from environment variables
@@ -9,130 +8,73 @@ const CALCULATION_VERSION = process.env.CALCULATION_VERSION || "1.0.0";
 const GEE_ADAPTER_VERSION = process.env.GEE_ADAPTER_VERSION || "1.0.0";
 
 /**
- * Helper function to extract metric values by name with proper error handling
- */
-async function getMetricsByNames(companyId, metricNames, years = []) {
-  try {
-    const query = {
-      company: companyId,
-      is_active: true,
-      "metrics.metric_name": { $in: metricNames },
-    };
-
-    if (years.length > 0) {
-      query["metrics.values.year"] = { $in: years };
-    }
-
-    const esgData = await ESGData.find(query)
-      .populate(
-        "company",
-        "name industry country esg_reporting_framework latest_esg_report_year",
-      )
-      .lean();
-
-    // Extract and organize metrics
-    const metrics = {};
-
-    esgData.forEach((data) => {
-      data.metrics.forEach((metric) => {
-        if (metricNames.includes(metric.metric_name)) {
-          if (!metrics[metric.metric_name]) {
-            metrics[metric.metric_name] = {
-              name: metric.metric_name,
-              category: metric.category,
-              unit: metric.unit,
-              description: metric.description || "",
-              values: [],
-            };
-          }
-
-          metric.values.forEach((value) => {
-            if (years.length === 0 || years.includes(value.year)) {
-              let numericValue = value.numeric_value;
-              if (numericValue === undefined || numericValue === null) {
-                if (typeof value.value === "string") {
-                  const parsed = parseFloat(
-                    value.value.replace(/[^0-9.-]+/g, ""),
-                  );
-                  numericValue = isNaN(parsed) ? 0 : parsed;
-                } else if (typeof value.value === "number") {
-                  numericValue = value.value;
-                } else {
-                  numericValue = 0;
-                }
-              }
-
-              metrics[metric.metric_name].values.push({
-                year: value.year,
-                value: value.value,
-                numeric_value: numericValue,
-                source_notes: value.source_notes,
-              });
-            }
-          });
-        }
-      });
-    });
-
-    // Sort values by year
-    Object.keys(metrics).forEach((metricName) => {
-      metrics[metricName].values.sort((a, b) => a.year - b.year);
-    });
-
-    return metrics;
-  } catch (error) {
-    throw new AppError(
-      `Error fetching metrics: ${error.message}`,
-      500,
-      "METRICS_FETCH_ERROR",
-    );
-  }
-}
-
-/**
- * Helper function to get unique years from metrics
- */
-function getUniqueYearsFromMetrics(metrics, year = null) {
-  if (year) return [year];
-
-  const allYears = new Set();
-  Object.values(metrics).forEach((metric) => {
-    metric.values.forEach((value) => {
-      allYears.add(value.year);
-    });
-  });
-
-  return Array.from(allYears).sort();
-}
-
-/**
- * Helper function to calculate percentage change
- */
-function calculatePercentageChange(initialValue, finalValue) {
-  if (!initialValue || initialValue === 0) return 0;
-  return ((finalValue - initialValue) / initialValue) * 100;
-}
-
-/**
- * Helper function to get metric value by year
+ * Helper: Extract metric value by year from yearly_data array
  */
 function getMetricValueByYear(metric, year) {
-  if (!metric || !metric.values) return null;
-  const value = metric.values.find((v) => v.year === year);
-  return value ? value.numeric_value || parseFloat(value.value) || 0 : null;
+  if (!metric || !metric.yearly_data || !Array.isArray(metric.yearly_data))
+    return null;
+
+  const entry = metric.yearly_data.find((yd) => {
+    // Match both fiscal year string (FY25) and numeric year (2025)
+    const yearStr = yd.year?.toString() || "";
+    return (
+      yearStr.includes(year) ||
+      (yd.fiscal_year && yd.fiscal_year.toString() === year.toString())
+    );
+  });
+
+  if (!entry) return null;
+
+  // Return numeric_value if available, else parse value
+  if (entry.numeric_value !== undefined && entry.numeric_value !== null) {
+    return entry.numeric_value;
+  }
+  if (typeof entry.value === "number") return entry.value;
+  if (typeof entry.value === "string") {
+    const parsed = parseFloat(entry.value.replace(/[^0-9.-]+/g, ""));
+    return isNaN(parsed) ? null : parsed;
+  }
+  return null;
 }
 
 /**
- * Helper function to calculate trends
+ * Helper: Get all unique years from all metrics' yearly_data
  */
-function calculateTrend(values, years) {
-  if (!values || values.length < 2) return "stable";
+function getUniqueYearsFromMetrics(metrics) {
+  const yearsSet = new Set();
+  metrics.forEach((metric) => {
+    if (metric.yearly_data) {
+      metric.yearly_data.forEach((yd) => {
+        if (yd.fiscal_year) yearsSet.add(yd.fiscal_year);
+        else if (yd.year) {
+          const yearNum = parseInt(yd.year.toString().replace(/[^0-9]/g, ""));
+          if (!isNaN(yearNum)) yearsSet.add(yearNum);
+        }
+      });
+    }
+  });
+  return Array.from(yearsSet).sort((a, b) => a - b);
+}
+
+/**
+ * Helper: Calculate percentage change
+ */
+function calculatePercentageChange(initial, final) {
+  if (!initial || initial === 0) return 0;
+  return ((final - initial) / initial) * 100;
+}
+
+/**
+ * Helper: Calculate trend for a metric over given years
+ */
+function calculateTrend(metric, years) {
+  if (!metric || !metric.yearly_data || years.length < 2) return "stable";
 
   const firstYear = Math.min(...years);
   const lastYear = Math.max(...years);
 
-  const firstValue = getMetricValueByYear(values, firstYear);
-  const lastValue = getMetricValueByYear(values, lastYear);
+  const firstValue = getMetricValueByYear(metric, firstYear);
+  const lastValue = getMetricValueByYear(metric, lastYear);
 
   if (firstValue === null || lastValue === null) return "stable";
 
@@ -144,293 +86,101 @@ function calculateTrend(values, years) {
 }
 
 /**
- * Helper function to get comprehensive Carbon Emission Accounting data with monthly breakdown
+ * Helper: Group metrics by category
  */
-async function getComprehensiveCarbonEmissionData(
-  companyId,
-  startYear = null,
-  endYear = null,
-) {
-  try {
-    const query = {
-      company: companyId,
-      is_active: true,
-      status: { $in: ["draft", "under_review", "approved", "published"] },
-    };
-
-    const carbonData = await CarbonEmissionAccounting.findOne(query)
-      .populate("created_by", "name email")
-      .populate("last_updated_by", "name email")
-      .lean();
-
-    if (!carbonData) {
-      return null;
-    }
-
-    // Filter yearly data for the specified range
-    let filteredYearlyData = carbonData.yearly_data || [];
-    if (startYear && endYear) {
-      filteredYearlyData = filteredYearlyData.filter(
-        (yd) => yd.year >= startYear && yd.year <= endYear,
-      );
-    }
-
-    // Sort yearly data by year
-    filteredYearlyData.sort((a, b) => a.year - b.year);
-
-    // Enhance yearly data with monthly breakdowns
-    const enhancedYearlyData = filteredYearlyData.map((yearData) => {
-      const enhanced = { ...yearData };
-
-      // Extract monthly sequestration data if available
-      if (enhanced.sequestration?.monthly_data) {
-        enhanced.monthly_breakdown = {
-          ndvi_trends: enhanced.sequestration.monthly_data.map((month) => ({
-            month: month.month,
-            month_name: getMonthName(month.month),
-            ndvi_max: month.ndvi_max || 0,
-            ndvi_mean: month.ndvi_mean || 0,
-            biomass_co2: month.biomass_co2_t || 0,
-            soc_co2: month.soc_co2_t || 0,
-            total_co2: (month.biomass_co2_t || 0) + (month.soc_co2_t || 0),
-          })),
-          annual_summary: enhanced.sequestration.annual_summary,
-        };
-      }
-
-      // Extract monthly emission data if available
-      if (enhanced.emissions?.monthly_breakdown) {
-        enhanced.monthly_emissions = enhanced.emissions.monthly_breakdown;
-      }
-
-      return enhanced;
-    });
-
-    return {
-      ...carbonData,
-      yearly_data: enhancedYearlyData,
-    };
-  } catch (error) {
-    console.error("Error fetching comprehensive carbon emission data:", error);
-    return null;
-  }
-}
-
-/**
- * Helper function to get month name
- */
-function getMonthName(monthNumber) {
-  const months = [
-    "January",
-    "February",
-    "March",
-    "April",
-    "May",
-    "June",
-    "July",
-    "August",
-    "September",
-    "October",
-    "November",
-    "December",
-  ];
-  return months[monthNumber - 1] || `Month ${monthNumber}`;
-}
-
-/**
- * Calculate deforestation and land use change analysis based on actual data
- */
-function calculateDeforestationAnalysis(metrics, carbonData, years) {
-  const currentYear = Math.max(...years);
-  const previousYear = years.length > 1 ? currentYear - 1 : null;
-
-  // Extract key land use metrics
-  const forestArea = metrics["Land Use - Forest Area (ha)"];
-  const agriculturalArea = metrics["Land Use - Agricultural Area (ha)"];
-  const protectedArea = metrics["Land Use - Protected Area (ha)"];
-  const totalArea = metrics["Land Use - Total Area (ha)"];
-
-  const currentForest = getMetricValueByYear(forestArea, currentYear) || 0;
-  const previousForest = previousYear
-    ? getMetricValueByYear(forestArea, previousYear) || 0
-    : 0;
-  const currentAgri = getMetricValueByYear(agriculturalArea, currentYear) || 0;
-  const previousAgri = previousYear
-    ? getMetricValueByYear(agriculturalArea, previousYear) || 0
-    : 0;
-  const currentProtected =
-    getMetricValueByYear(protectedArea, currentYear) || 0;
-  const currentTotal = getMetricValueByYear(totalArea, currentYear) || 1;
-
-  // Calculate changes
-  const forestChange =
-    previousForest > 0
-      ? ((currentForest - previousForest) / previousForest) * 100
-      : 0;
-  const agriChange =
-    previousAgri > 0 ? ((currentAgri - previousAgri) / previousAgri) * 100 : 0;
-
-  // Calculate coverage percentages
-  const forestCoveragePercent = (currentForest / currentTotal) * 100;
-  const protectedAreaPercent = (currentProtected / currentTotal) * 100;
-
-  return {
-    forest_coverage: {
-      current: currentForest,
-      previous: previousForest,
-      change_percent: forestChange,
-      coverage_percent: forestCoveragePercent,
-    },
-    agricultural_expansion: {
-      current: currentAgri,
-      previous: previousAgri,
-      change_percent: agriChange,
-    },
-    protected_area_coverage: {
-      area: currentProtected,
-      percentage: protectedAreaPercent,
-    },
+function groupMetricsByCategory(metrics) {
+  const grouped = {
+    agricultural_land: [],
+    conservation_protected_habitat: [],
+    land_tenure: [],
+    restoration_deforestation: [],
+    fuelwood_substitution: [],
+    biodiversity_flora: [],
+    biodiversity_fauna: [],
+    human_wildlife_conflict: [],
+    summary: [],
   };
-}
 
-/**
- * Calculate comprehensive biodiversity assessment based on actual data
- */
-function calculateBiodiversityAssessment(metrics, carbonData, years) {
-  const currentYear = Math.max(...years);
-
-  // Extract environmental metrics that exist in the database
-  const environmentalMetrics = {};
-  const socialMetrics = {};
-  const governanceMetrics = {};
-
-  // Extract actual metric values
-  Object.keys(metrics).forEach((metricName) => {
-    const metric = metrics[metricName];
-    const value = getMetricValueByYear(metric, currentYear);
-
-    if (metric.category === "environmental") {
-      environmentalMetrics[metricName] = value;
-    } else if (metric.category === "social") {
-      socialMetrics[metricName] = value;
-    } else if (metric.category === "governance") {
-      governanceMetrics[metricName] = value;
+  metrics.forEach((metric) => {
+    if (grouped[metric.category]) {
+      grouped[metric.category].push(metric);
+    } else {
+      // fallback: push to summary
+      grouped.summary.push(metric);
     }
   });
 
-  return {
-    environmental_metrics: environmentalMetrics,
-    social_metrics: socialMetrics,
-    governance_metrics: governanceMetrics,
-    current_year: currentYear,
-  };
+  return grouped;
 }
 
 /**
- * Generate comprehensive graphs for biodiversity and land use based on actual data
+ * Helper: Generate basic visualisation data from metrics
  */
-function generateBiodiversityGraphs(metrics, carbonData, years) {
+function generateGraphs(metrics, years) {
   const graphs = {};
   const currentYear = Math.max(...years);
 
-  // 1. Land Use Composition (Current Year) - only if we have the data
-  const forestArea = metrics["Land Use - Forest Area (ha)"];
-  const agriArea = metrics["Land Use - Agricultural Area (ha)"];
-  const protectedArea = metrics["Land Use - Protected Area (ha)"];
-  const totalArea = metrics["Land Use - Total Area (ha)"];
+  // --- Land Use Composition (current year) ---
+  const conservationMetric = metrics.find(
+    (m) =>
+      m.category === "conservation_protected_habitat" &&
+      m.metric_name.toLowerCase().includes("conservation area"),
+  );
+  const agriMetric = metrics.find(
+    (m) =>
+      m.category === "agricultural_land" &&
+      m.metric_name.toLowerCase().includes("area"),
+  );
+  const totalLandMetric = metrics.find(
+    (m) =>
+      m.category === "summary" &&
+      m.metric_name.toLowerCase().includes("total area"),
+  );
 
-  if (forestArea && agriArea && protectedArea && totalArea) {
-    const forestValue = getMetricValueByYear(forestArea, currentYear) || 0;
-    const agriValue = getMetricValueByYear(agriArea, currentYear) || 0;
-    const protectedValue =
-      getMetricValueByYear(protectedArea, currentYear) || 0;
-    const totalValue = getMetricValueByYear(totalArea, currentYear) || 1;
-    const otherValue = Math.max(
-      0,
-      totalValue - forestValue - agriValue - protectedValue,
-    );
+  if (conservationMetric && agriMetric && totalLandMetric) {
+    const consValue =
+      getMetricValueByYear(conservationMetric, currentYear) || 0;
+    const agriValue = getMetricValueByYear(agriMetric, currentYear) || 0;
+    const totalValue = getMetricValueByYear(totalLandMetric, currentYear) || 1;
+    const otherValue = Math.max(0, totalValue - consValue - agriValue);
 
-    if (totalValue > 0) {
-      graphs.land_use_composition = {
-        type: "doughnut",
-        title: "Land Use Composition",
-        description: "Distribution of land area by use type",
-        labels: [
-          "Forest Area",
-          "Agricultural Area",
-          "Protected Area",
-          "Other Area",
-        ],
-        datasets: [
-          {
-            data: [forestValue, agriValue, protectedValue, otherValue],
-            backgroundColor: ["#27ae60", "#f39c12", "#3498db", "#95a5a6"],
-            borderWidth: 2,
-          },
-        ],
-      };
-    }
-  }
-
-  // 2. NDVI Monthly Trend (for all available years from carbon data)
-  if (carbonData && carbonData.yearly_data) {
-    const ndviGraphs = {};
-
-    carbonData.yearly_data.forEach((yearData) => {
-      if (yearData.monthly_breakdown?.ndvi_trends) {
-        ndviGraphs[yearData.year] = {
-          type: "line",
-          title: `Monthly NDVI Trend - ${yearData.year}`,
-          description:
-            "Normalized Difference Vegetation Index monthly variation",
-          labels: yearData.monthly_breakdown.ndvi_trends.map(
-            (m) => m.month_name,
-          ),
-          datasets: [
-            {
-              label: "NDVI Max",
-              data: yearData.monthly_breakdown.ndvi_trends.map(
-                (m) => m.ndvi_max || 0,
-              ),
-              borderColor: "#27ae60",
-              backgroundColor: "rgba(39, 174, 96, 0.1)",
-              fill: true,
-            },
-            {
-              label: "NDVI Mean",
-              data: yearData.monthly_breakdown.ndvi_trends.map(
-                (m) => m.ndvi_mean || 0,
-              ),
-              borderColor: "#2ecc71",
-              borderDash: [5, 5],
-              fill: false,
-            },
-          ],
-        };
-      }
-    });
-
-    if (Object.keys(ndviGraphs).length > 0) {
-      graphs.ndvi_monthly_trends = ndviGraphs;
-    }
-  }
-
-  // 3. Forest Area Trend Over Time - only if we have multiple years of data
-  if (forestArea && forestArea.values && forestArea.values.length >= 2) {
-    const forestYears = forestArea.values.map((v) => v.year);
-    const forestValues = forestArea.values.map(
-      (v) => v.numeric_value || parseFloat(v.value) || 0,
-    );
-
-    graphs.forest_area_trend = {
-      type: "line",
-      title: "Forest Area Trend",
-      description: "Historical changes in forest coverage",
-      labels: forestYears,
+    graphs.land_use_composition = {
+      type: "doughnut",
+      title: "Land Use Composition",
+      description: "Distribution of land area by use type",
+      labels: ["Conservation Area", "Agricultural Area", "Other Area"],
       datasets: [
         {
-          label: "Forest Area (ha)",
-          data: forestValues,
+          data: [consValue, agriValue, otherValue],
+          backgroundColor: ["#27ae60", "#f39c12", "#95a5a6"],
+          borderWidth: 2,
+        },
+      ],
+    };
+  }
+
+  // --- Forest / Tree Cover Trend ---
+  const forestMetric = metrics.find(
+    (m) =>
+      m.category === "restoration_deforestation" &&
+      (m.metric_name.toLowerCase().includes("forest") ||
+        m.metric_name.toLowerCase().includes("tree cover")),
+  );
+  if (forestMetric && forestMetric.yearly_data?.length >= 2) {
+    const sorted = [...forestMetric.yearly_data]
+      .filter((yd) => yd.fiscal_year)
+      .sort((a, b) => a.fiscal_year - b.fiscal_year);
+    graphs.forest_area_trend = {
+      type: "line",
+      title: "Forest / Tree Cover Trend",
+      description: "Historical changes in forest/tree cover",
+      labels: sorted.map((yd) => yd.fiscal_year),
+      datasets: [
+        {
+          label: "Area (ha)",
+          data: sorted.map((yd) =>
+            getMetricValueByYear(forestMetric, yd.fiscal_year),
+          ),
           borderColor: "#27ae60",
           backgroundColor: "rgba(39, 174, 96, 0.1)",
           fill: true,
@@ -440,141 +190,27 @@ function generateBiodiversityGraphs(metrics, carbonData, years) {
     };
   }
 
-  // 4. Carbon Sequestration vs Emissions - if carbon data is available
-  if (
-    carbonData &&
-    carbonData.yearly_data &&
-    carbonData.yearly_data.length >= 2
-  ) {
-    const sortedData = [...carbonData.yearly_data].sort(
-      (a, b) => a.year - b.year,
-    );
-
-    const sequestrationData = sortedData.map(
-      (d) => d.sequestration?.annual_summary?.sequestration_total_tco2 || 0,
-    );
-    const emissionsData = sortedData.map(
-      (d) => d.emissions?.total_scope_emission_tco2e || 0,
-    );
-
-    // Only include if we have actual data
-    if (
-      sequestrationData.some((v) => v > 0) ||
-      emissionsData.some((v) => v > 0)
-    ) {
-      graphs.carbon_balance_trend = {
-        type: "bar",
-        title: "Carbon Balance Trend",
-        description: "Comparison of carbon sequestration and emissions",
-        labels: sortedData.map((d) => d.year),
-        datasets: [
-          {
-            label: "Carbon Sequestration (tCO₂)",
-            data: sequestrationData,
-            backgroundColor: "#27ae60",
-          },
-          {
-            label: "GHG Emissions (tCO₂e)",
-            data: emissionsData,
-            backgroundColor: "#e74c3c",
-          },
-        ],
-      };
-    }
-  }
-
-  // 5. Monthly Carbon Sequestration Breakdown - if carbon data is available
-  if (carbonData && carbonData.yearly_data) {
-    const yearData = carbonData.yearly_data.find((y) => y.year === currentYear);
-    if (yearData?.monthly_breakdown?.ndvi_trends) {
-      const biomassData = yearData.monthly_breakdown.ndvi_trends.map(
-        (m) => m.biomass_co2,
-      );
-      const socData = yearData.monthly_breakdown.ndvi_trends.map(
-        (m) => m.soc_co2,
-      );
-
-      if (biomassData.some((v) => v > 0) || socData.some((v) => v > 0)) {
-        graphs.monthly_carbon_sequestration = {
-          type: "bar",
-          title: `Monthly Carbon Sequestration - ${currentYear}`,
-          description: "Monthly breakdown of biomass and soil organic carbon",
-          labels: yearData.monthly_breakdown.ndvi_trends.map(
-            (m) => m.month_name,
+  // --- Species Count Trend ---
+  const faunaMetric = metrics.find(
+    (m) =>
+      m.category === "biodiversity_fauna" &&
+      m.metric_name.toLowerCase().includes("species"),
+  );
+  if (faunaMetric && faunaMetric.yearly_data?.length >= 2) {
+    const sorted = [...faunaMetric.yearly_data]
+      .filter((yd) => yd.fiscal_year)
+      .sort((a, b) => a.fiscal_year - b.fiscal_year);
+    graphs.species_count_trend = {
+      type: "line",
+      title: "Fauna Species Count Trend",
+      description: "Changes in number of fauna species",
+      labels: sorted.map((yd) => yd.fiscal_year),
+      datasets: [
+        {
+          label: "Species Count",
+          data: sorted.map((yd) =>
+            getMetricValueByYear(faunaMetric, yd.fiscal_year),
           ),
-          datasets: [
-            {
-              label: "Biomass CO₂ (t)",
-              data: biomassData,
-              backgroundColor: "#f39c12",
-            },
-            {
-              label: "Soil Organic Carbon CO₂ (t)",
-              data: socData,
-              backgroundColor: "#8e44ad",
-            },
-          ],
-        };
-      }
-    }
-  }
-
-  // 6. Environmental Incidents Timeline - only if we have the data
-  const incidentsMetric =
-    metrics[
-      "Environment Incidents (Sewage blockage, Stillage overflow, Illegal waste disposal, Out of spec emissions, Effluent spillage, Water loss)"
-    ];
-
-  if (
-    incidentsMetric &&
-    incidentsMetric.values &&
-    incidentsMetric.values.length >= 2
-  ) {
-    const incidentYears = incidentsMetric.values.map((v) => v.year);
-    const incidentValues = incidentsMetric.values.map(
-      (v) => v.numeric_value || parseFloat(v.value) || 0,
-    );
-
-    graphs.environmental_incidents_timeline = {
-      type: "line",
-      title: "Environmental Incidents Trend",
-      description: "Historical trend of environmental incidents",
-      labels: incidentYears,
-      datasets: [
-        {
-          label: "Incidents Count",
-          data: incidentValues,
-          borderColor: "#e74c3c",
-          backgroundColor: "rgba(231, 76, 60, 0.1)",
-          fill: true,
-          tension: 0.4,
-        },
-      ],
-    };
-  }
-
-  // 7. Water Usage Trend - if we have the data
-  const waterUsageMetric =
-    metrics["Water Usage - Irrigation Water Usage (million ML)"];
-  if (
-    waterUsageMetric &&
-    waterUsageMetric.values &&
-    waterUsageMetric.values.length >= 2
-  ) {
-    const waterYears = waterUsageMetric.values.map((v) => v.year);
-    const waterValues = waterUsageMetric.values.map(
-      (v) => v.numeric_value || parseFloat(v.value) || 0,
-    );
-
-    graphs.water_usage_trend = {
-      type: "line",
-      title: "Water Usage Trend",
-      description: "Historical trend of irrigation water usage",
-      labels: waterYears,
-      datasets: [
-        {
-          label: "Water Usage (million ML)",
-          data: waterValues,
           borderColor: "#3498db",
           backgroundColor: "rgba(52, 152, 219, 0.1)",
           fill: true,
@@ -584,216 +220,91 @@ function generateBiodiversityGraphs(metrics, carbonData, years) {
     };
   }
 
+  // --- Trees Planted Trend ---
+  const treesPlantedMetric = metrics.find(
+    (m) =>
+      m.category === "restoration_deforestation" &&
+      m.metric_name.toLowerCase().includes("trees planted"),
+  );
+  if (treesPlantedMetric && treesPlantedMetric.yearly_data?.length >= 2) {
+    const sorted = [...treesPlantedMetric.yearly_data]
+      .filter((yd) => yd.fiscal_year)
+      .sort((a, b) => a.fiscal_year - b.fiscal_year);
+    graphs.trees_planted_trend = {
+      type: "bar",
+      title: "Trees Planted Annually",
+      description: "Number of trees planted each year",
+      labels: sorted.map((yd) => yd.fiscal_year),
+      datasets: [
+        {
+          label: "Trees Planted",
+          data: sorted.map((yd) =>
+            getMetricValueByYear(treesPlantedMetric, yd.fiscal_year),
+          ),
+          backgroundColor: "#2ecc71",
+        },
+      ],
+    };
+  }
+
   return graphs;
 }
 
 /**
- * Calculate key biodiversity statistics from actual data
+ * Helper: Calculate key statistics from metrics
  */
-function calculateKeyBiodiversityStats(metrics, carbonData, years) {
-  const currentYear = Math.max(...years);
-
+function calculateKeyStatistics(metrics, currentYear) {
   const stats = {
-    total_metrics_analyzed: Object.keys(metrics).length,
-    years_covered: years.length,
-    current_year: currentYear,
-    environmental_metrics: {},
-    biodiversity_metrics: {},
-    social_governance_metrics: {},
+    total_conservation_area: 0,
+    total_agricultural_area: 0,
+    total_restored_area: 0,
+    flora_species_count: 0,
+    fauna_species_count: 0,
+    trees_planted_cumulative: 0,
+    lpg_distributions: 0,
+    human_wildlife_conflicts: 0,
   };
 
-  // Extract actual environmental metrics
-  const waterUsage = getMetricValueByYear(
-    metrics["Water Usage - Irrigation Water Usage (million ML)"],
-    currentYear,
-  );
-  if (waterUsage !== null) {
-    stats.environmental_metrics.total_water_usage = waterUsage;
-  }
+  metrics.forEach((metric) => {
+    const value = getMetricValueByYear(metric, currentYear);
+    if (value === null) return;
 
-  const hazardousWaste = getMetricValueByYear(
-    metrics[
-      "Environment Incidents - Waste streams produced - Hazardous waste (tons)"
-    ],
-    currentYear,
-  );
-  if (hazardousWaste !== null) {
-    stats.environmental_metrics.total_hazardous_waste = hazardousWaste;
-  }
+    const name = metric.metric_name.toLowerCase();
 
-  const incidents = getMetricValueByYear(
-    metrics[
-      "Environment Incidents (Sewage blockage, Stillage overflow, Illegal waste disposal, Out of spec emissions, Effluent spillage, Water loss)"
-    ],
-    currentYear,
-  );
-  if (incidents !== null) {
-    stats.environmental_metrics.total_incidents = incidents;
-  }
-
-  const forestArea = getMetricValueByYear(
-    metrics["Land Use - Forest Area (ha)"],
-    currentYear,
-  );
-  const totalArea = getMetricValueByYear(
-    metrics["Land Use - Total Area (ha)"],
-    currentYear,
-  );
-  if (forestArea !== null && totalArea !== null && totalArea > 0) {
-    stats.environmental_metrics.forest_coverage_percent =
-      (forestArea / totalArea) * 100;
-  }
-
-  const protectedArea = getMetricValueByYear(
-    metrics["Land Use - Protected Area (ha)"],
-    currentYear,
-  );
-  if (protectedArea !== null && totalArea !== null && totalArea > 0) {
-    stats.environmental_metrics.protected_area_percent =
-      (protectedArea / totalArea) * 100;
-  }
-
-  // Extract biodiversity metrics
-  const endangeredSpecies = getMetricValueByYear(
-    metrics["Biodiversity - Endangered Species Count"],
-    currentYear,
-  );
-  if (endangeredSpecies !== null) {
-    stats.biodiversity_metrics.endangered_species_count = endangeredSpecies;
-  }
-
-  const habitatRestoration = getMetricValueByYear(
-    metrics["Biodiversity - Habitat Restoration Area (ha)"],
-    currentYear,
-  );
-  if (habitatRestoration !== null) {
-    stats.biodiversity_metrics.habitat_restoration_area = habitatRestoration;
-    if (totalArea !== null && totalArea > 0) {
-      stats.biodiversity_metrics.restoration_percentage =
-        (habitatRestoration / totalArea) * 100;
+    if (metric.category === "conservation_protected_habitat") {
+      if (name.includes("conservation area") || name.includes("protected area"))
+        stats.total_conservation_area += value;
     }
-  }
-
-  // Extract social and governance metrics
-  const communityPrograms = getMetricValueByYear(
-    metrics["Social - Community Engagement Programs (count)"],
-    currentYear,
-  );
-  if (communityPrograms !== null) {
-    stats.social_governance_metrics.community_programs = communityPrograms;
-  }
-
-  const landUsePolicy = getMetricValueByYear(
-    metrics["Governance - Land Use Policy (yes/no)"],
-    currentYear,
-  );
-  if (landUsePolicy !== null) {
-    stats.social_governance_metrics.land_use_policy = landUsePolicy
-      ? "Yes"
-      : "No";
-  }
-
-  const biodiversityPolicy = getMetricValueByYear(
-    metrics["Governance - Biodiversity Policy (yes/no)"],
-    currentYear,
-  );
-  if (biodiversityPolicy !== null) {
-    stats.social_governance_metrics.biodiversity_policy = biodiversityPolicy
-      ? "Yes"
-      : "No";
-  }
+    if (metric.category === "agricultural_land") {
+      if (name.includes("area")) stats.total_agricultural_area += value;
+    }
+    if (metric.category === "restoration_deforestation") {
+      if (name.includes("restored area") || name.includes("rehabilitated"))
+        stats.total_restored_area += value;
+      if (name.includes("trees planted")) {
+        stats.trees_planted_cumulative += value; // if yearly, we'd sum; but assume cumulative
+      }
+    }
+    if (metric.category === "biodiversity_flora") {
+      if (name.includes("species")) stats.flora_species_count = value;
+    }
+    if (metric.category === "biodiversity_fauna") {
+      if (name.includes("species")) stats.fauna_species_count = value;
+    }
+    if (metric.category === "fuelwood_substitution") {
+      if (name.includes("lpg")) stats.lpg_distributions += value;
+    }
+    if (metric.category === "human_wildlife_conflict") {
+      if (name.includes("incident") || name.includes("conflict"))
+        stats.human_wildlife_conflicts += value;
+    }
+  });
 
   return stats;
 }
 
 /**
- * Calculate water efficiency based on actual data
- */
-function calculateWaterEfficiency(metrics, currentYear) {
-  const waterUsage = getMetricValueByYear(
-    metrics["Water Usage - Irrigation Water Usage (million ML)"],
-    currentYear,
-  );
-
-  const totalArea = getMetricValueByYear(
-    metrics["Land Use - Total Area (ha)"],
-    currentYear,
-  );
-
-  if (waterUsage === null || totalArea === null || totalArea === 0) {
-    return null;
-  }
-
-  return {
-    water_usage_per_ha: waterUsage / totalArea,
-    total_water_usage: waterUsage,
-    total_area: totalArea,
-  };
-}
-
-/**
- * Calculate land use change based on actual data
- */
-function calculateLandUseChange(metrics, years) {
-  if (years.length < 2) {
-    return {
-      change_detected: false,
-      message: "Insufficient data for change analysis",
-    };
-  }
-
-  const startYear = Math.min(...years);
-  const endYear = Math.max(...years);
-
-  const forestStart = getMetricValueByYear(
-    metrics["Land Use - Forest Area (ha)"],
-    startYear,
-  );
-  const forestEnd = getMetricValueByYear(
-    metrics["Land Use - Forest Area (ha)"],
-    endYear,
-  );
-
-  const agriStart = getMetricValueByYear(
-    metrics["Land Use - Agricultural Area (ha)"],
-    startYear,
-  );
-  const agriEnd = getMetricValueByYear(
-    metrics["Land Use - Agricultural Area (ha)"],
-    endYear,
-  );
-
-  const analysis = {
-    period: `${startYear}-${endYear}`,
-    forest_area: {
-      start: forestStart,
-      end: forestEnd,
-      change:
-        forestStart !== null && forestEnd !== null
-          ? forestEnd - forestStart
-          : null,
-      change_percent:
-        forestStart !== null && forestStart > 0 && forestEnd !== null
-          ? ((forestEnd - forestStart) / forestStart) * 100
-          : null,
-    },
-    agricultural_area: {
-      start: agriStart,
-      end: agriEnd,
-      change:
-        agriStart !== null && agriEnd !== null ? agriEnd - agriStart : null,
-      change_percent:
-        agriStart !== null && agriStart > 0 && agriEnd !== null
-          ? ((agriEnd - agriStart) / agriStart) * 100
-          : null,
-    },
-  };
-
-  return analysis;
-}
-
-/**
- * Main Biodiversity & Land Use Integrity API
+ * Main function: Get Biodiversity & Land Use Integrity data from dedicated model
  */
 async function getBiodiversityLandUseData(
   companyId,
@@ -802,7 +313,7 @@ async function getBiodiversityLandUseData(
   endYear = null,
 ) {
   try {
-    // Year is now required
+    // Year validation
     if (!year && (!startYear || !endYear)) {
       throw new AppError(
         "Year or year range is required",
@@ -811,13 +322,36 @@ async function getBiodiversityLandUseData(
       );
     }
 
-    // Get company with all fields
-    const company = await Company.findById(companyId).lean();
+    // Fetch the most recent active biodiversity record for the company
+    const biodiversityRecord = await BiodiversityLandUse.findOne({
+      company: companyId,
+      is_active: true,
+    })
+      .populate("company") // ✅ Populate entire company document (no field restrictions)
+      .populate("created_by", "name email")
+      .populate("last_updated_by", "name email")
+      .populate("verified_by", "name email")
+      .populate("metrics.created_by", "name email")
+      .populate("metrics.yearly_data.added_by", "name email")
+      .populate("metrics.yearly_data.last_updated_by", "name email")
+      .lean();
+
+    if (!biodiversityRecord) {
+      throw new AppError(
+        "No biodiversity and land use data found for this company",
+        404,
+        "BIODIVERSITY_DATA_NOT_FOUND",
+      );
+    }
+
+    // Company is already populated, but for safety we also fetch from Company model if needed
+    const company =
+      biodiversityRecord.company || (await Company.findById(companyId).lean());
     if (!company) {
       throw new AppError("Company not found", 404, "COMPANY_NOT_FOUND");
     }
 
-    // Determine year range
+    // Determine target years for filtering
     let targetYears = [];
     if (year) {
       targetYears = [year];
@@ -828,353 +362,132 @@ async function getBiodiversityLandUseData(
       );
     }
 
-    // Comprehensive list of metrics for biodiversity and land use analysis
-    const metricNames = [
-      // Environmental Metrics
-      "Water Usage - Irrigation Water Usage (million ML)",
-      "Waste Management - Recycled waste (excl. Boiler Ash) (tons)",
-      "Environment Incidents - Waste streams produced - Hazardous waste (tons)",
-      "Environment Incidents (Sewage blockage, Stillage overflow, Illegal waste disposal, Out of spec emissions, Effluent spillage, Water loss)",
-      "Land Use - Total Area (ha)",
-      "Land Use - Agricultural Area (ha)",
-      "Land Use - Forest Area (ha)",
-      "Land Use - Protected Area (ha)",
-      "Biodiversity - Endangered Species Count",
-      "Biodiversity - Habitat Restoration Area (ha)",
-      "Water Management - Water Withdrawal (million ML)",
-      "Water Management - Water Consumption (million ML)",
-      "Soil Quality - Erosion Rate (tons/ha/year)",
-      "Soil Quality - Organic Matter Content (%)",
-      "Carbon Emissions (Total GHG, tCO2e)",
-      "GHG Scope 1 (tCO2e)",
-      "GHG Scope 2 (tCO2e)",
-      "GHG Scope 3 (tCO2e)",
+    // Use all metrics from the record (they are already biodiversity/land use focused)
+    let metrics = biodiversityRecord.metrics || [];
 
-      // Social Metrics related to land use
-      "Social - Community Engagement Programs (count)",
-      "Social - Local Employment Rate (%)",
-      "Social - Land Rights Complaints (count)",
-      "Social - Resettlement Programs (count)",
-      "Social - Indigenous Peoples Engagement (yes/no)",
-      "Social - Community Development Investment (US$)",
-      "Social - Health and Safety Incidents (count)",
-      "Social - Training Hours per Employee",
+    // Filter metrics to only include those with data in target years (optional, but can be done)
+    if (targetYears.length > 0) {
+      metrics = metrics.filter((metric) => {
+        if (!metric.yearly_data) return false;
+        return metric.yearly_data.some((yd) => {
+          const yearNum =
+            yd.fiscal_year ||
+            parseInt(yd.year.toString().replace(/[^0-9]/g, ""));
+          return targetYears.includes(yearNum);
+        });
+      });
+    }
 
-      // Governance Metrics related to land use
-      "Governance - Land Use Policy (yes/no)",
-      "Governance - Biodiversity Policy (yes/no)",
-      "Governance - Environmental Compliance Audits (count)",
-      "Governance - Board Oversight of Environmental Issues (yes/no)",
-      "Governance - Stakeholder Engagement on Land Use (yes/no)",
-      "Governance - ESG Reporting Quality (rating)",
-      "Governance - Risk Management Framework (yes/no)",
-    ];
-
-    // Get all metrics
-    const metrics = await getMetricsByNames(
-      companyId,
-      metricNames,
-      targetYears,
-    );
-    const years = getUniqueYearsFromMetrics(metrics, year);
-
+    // Get all available years from filtered metrics
+    const years = getUniqueYearsFromMetrics(metrics);
     if (years.length === 0) {
-      throw new AppError("No land use data available", 404, "NO_LAND_USE_DATA");
+      throw new AppError(
+        "No land use data available for the requested period",
+        404,
+        "NO_LAND_USE_DATA",
+      );
     }
 
     const currentYear = Math.max(...years);
     const baselineYear = Math.min(...years);
 
-    // Get comprehensive carbon emission data with monthly breakdowns
-    const carbonData = await getComprehensiveCarbonEmissionData(
-      companyId,
-      baselineYear,
-      currentYear,
-    );
+    // Group metrics by category for easier access
+    const groupedMetrics = groupMetricsByCategory(metrics);
 
-    // Calculate deforestation analysis based on actual data
-    const deforestationAnalysis = calculateDeforestationAnalysis(
-      metrics,
-      carbonData,
-      years,
-    );
+    // Calculate key statistics
+    const keyStats = calculateKeyStatistics(metrics, currentYear);
 
-    // Calculate biodiversity assessment based on actual data
-    const biodiversityAssessment = calculateBiodiversityAssessment(
-      metrics,
-      carbonData,
-      years,
-    );
+    // Generate graphs
+    const graphs = generateGraphs(metrics, years);
 
-    // Generate comprehensive graphs based on actual data
-    const graphs = generateBiodiversityGraphs(metrics, carbonData, years);
-
-    // Calculate key statistics from actual data
-    const keyStats = calculateKeyBiodiversityStats(metrics, carbonData, years);
-
-    // Calculate water efficiency
-    const waterEfficiency = calculateWaterEfficiency(metrics, currentYear);
-
-    // Calculate land use change
-    const landUseChange = calculateLandUseChange(metrics, years);
-
-    // Prepare carbon emission accounting data
-    const carbonEmissionAccounting = carbonData
-      ? {
-          framework: carbonData.framework,
-          methodology: carbonData.emission_references?.methodology_statement,
-          yearly_data: carbonData.yearly_data.map((yearData) => ({
-            year: yearData.year,
-            sequestration: {
-              total_tco2:
-                yearData.sequestration?.annual_summary
-                  ?.sequestration_total_tco2 || 0,
-              biomass_co2:
-                yearData.sequestration?.annual_summary?.total_biomass_co2_t ||
-                0,
-              soc_co2:
-                yearData.sequestration?.annual_summary?.total_soc_co2_t || 0,
-              monthly_data: yearData.monthly_breakdown?.ndvi_trends || [],
-            },
-            emissions: {
-              total_tco2e: yearData.emissions?.total_scope_emission_tco2e || 0,
-              scope1_tco2e: yearData.emissions?.scope1?.total_tco2e || 0,
-              scope2_tco2e: yearData.emissions?.scope2?.total_tco2e || 0,
-              scope3_tco2e: yearData.emissions?.scope3?.total_tco2e || 0,
-              net_balance: yearData.emissions?.net_total_emission_tco2e || 0,
-            },
-            land_area: {
-              total_ha: yearData.sequestration?.reporting_area_ha || 0,
-              soc_area_ha: yearData.sequestration?.soc_area_ha || 0,
-            },
-          })),
-        }
-      : null;
-
-    // Organize metrics by category
-    const metricsByCategory = {
-      environmental: [],
-      social: [],
-      governance: [],
-    };
-
-    Object.values(metrics).forEach((metric) => {
-      const metricData = {
-        name: metric.name,
-        unit: metric.unit,
-        description: metric.description,
-        current_value: getMetricValueByYear(metric, currentYear),
-        values: metric.values,
-      };
-
-      if (metric.category === "environmental") {
-        metricsByCategory.environmental.push(metricData);
-      } else if (metric.category === "social") {
-        metricsByCategory.social.push(metricData);
-      } else if (metric.category === "governance") {
-        metricsByCategory.governance.push(metricData);
-      }
-    });
-
-    const data = {
+    // Build response
+    const response = {
       metadata: {
         api_version: API_VERSION,
         calculation_version: CALCULATION_VERSION,
-        gee_adapter_version: GEE_ADAPTER_VERSION,
+        gee_adapter_version: GEE_ADAPTER_VERSION, // ✅ New version constant added
         generated_at: new Date().toISOString(),
         endpoint: "biodiversity_land_use",
         company_id: companyId,
         period_requested: year ? `${year}` : `${startYear}-${endYear}`,
-        data_sources: carbonData
-          ? ["ESGData", "CarbonEmissionAccounting"]
-          : ["ESGData"],
+        data_sources: ["BiodiversityLandUse"],
+        record_id: biodiversityRecord._id,
+        record_version: biodiversityRecord.version,
       },
 
-      // Return all company data
+      // ✅ Full company object (all fields) – now correctly populated
       company: company,
 
       reporting_period: {
+        data_period_start: biodiversityRecord.data_period_start,
+        data_period_end: biodiversityRecord.data_period_end,
         current_year: currentYear,
         baseline_year: baselineYear,
         analysis_years: years,
         period_covered: `${Math.min(...years)}-${Math.max(...years)}`,
-        data_completeness: `${Object.keys(metrics).length} metrics available`,
-        carbon_data_available: !!carbonData,
+        data_completeness: `${metrics.length} metrics available`,
       },
 
-      // Biodiversity Assessment based on actual data
-      biodiversity_assessment: biodiversityAssessment,
-
-      // Deforestation & Land Use Analysis based on actual data
-      deforestation_analysis: deforestationAnalysis,
-
-      // Land Use Metrics
-      land_use_metrics: {
-        current_year: {
-          total_area: getMetricValueByYear(
-            metrics["Land Use - Total Area (ha)"],
-            currentYear,
-          ),
-          forest_area: getMetricValueByYear(
-            metrics["Land Use - Forest Area (ha)"],
-            currentYear,
-          ),
-          agricultural_area: getMetricValueByYear(
-            metrics["Land Use - Agricultural Area (ha)"],
-            currentYear,
-          ),
-          protected_area: getMetricValueByYear(
-            metrics["Land Use - Protected Area (ha)"],
-            currentYear,
-          ),
-        },
-        trends: {
-          forest_area_trend: calculateTrend(
-            metrics["Land Use - Forest Area (ha)"],
-            years,
-          ),
-          agricultural_area_trend: calculateTrend(
-            metrics["Land Use - Agricultural Area (ha)"],
-            years,
-          ),
-        },
-        change_analysis: landUseChange,
+      // Original source and import information
+      source_information: {
+        original_source: biodiversityRecord.original_source,
+        source_files: biodiversityRecord.source_files,
+        import_source: biodiversityRecord.import_source,
+        import_batch_id: biodiversityRecord.import_batch_id,
+        import_date: biodiversityRecord.import_date,
+        import_notes: biodiversityRecord.import_notes,
       },
 
-      // Environmental Impact Metrics based on actual data
-      environmental_impact: {
-        water_management: {
-          current_usage: getMetricValueByYear(
-            metrics["Water Usage - Irrigation Water Usage (million ML)"],
-            currentYear,
-          ),
-          trend: calculateTrend(
-            metrics["Water Usage - Irrigation Water Usage (million ML)"],
-            years,
-          ),
-          efficiency: waterEfficiency,
-        },
-        waste_management: {
-          hazardous_waste: getMetricValueByYear(
-            metrics[
-              "Environment Incidents - Waste streams produced - Hazardous waste (tons)"
-            ],
-            currentYear,
-          ),
-          recycled_waste: getMetricValueByYear(
-            metrics[
-              "Waste Management - Recycled waste (excl. Boiler Ash) (tons)"
-            ],
-            currentYear,
-          ),
-          trend: calculateTrend(
-            metrics[
-              "Environment Incidents - Waste streams produced - Hazardous waste (tons)"
-            ],
-            years,
-          ),
-        },
-        incident_management: {
-          total_incidents: getMetricValueByYear(
-            metrics[
-              "Environment Incidents (Sewage blockage, Stillage overflow, Illegal waste disposal, Out of spec emissions, Effluent spillage, Water loss)"
-            ],
-            currentYear,
-          ),
-          trend: calculateTrend(
-            metrics[
-              "Environment Incidents (Sewage blockage, Stillage overflow, Illegal waste disposal, Out of spec emissions, Effluent spillage, Water loss)"
-            ],
-            years,
-          ),
-        },
-        soil_health: {
-          erosion_rate: getMetricValueByYear(
-            metrics["Soil Quality - Erosion Rate (tons/ha/year)"],
-            currentYear,
-          ),
-          organic_matter: getMetricValueByYear(
-            metrics["Soil Quality - Organic Matter Content (%)"],
-            currentYear,
-          ),
-          trend: calculateTrend(
-            metrics["Soil Quality - Organic Matter Content (%)"],
-            years,
-          ),
-        },
+      // Data quality and verification
+      data_quality: {
+        quality_score: biodiversityRecord.data_quality_score,
+        verification_status: biodiversityRecord.verification_status,
+        verified_by: biodiversityRecord.verified_by,
+        verified_at: biodiversityRecord.verified_at,
+        verification_notes: biodiversityRecord.verification_notes,
+        validation_status: biodiversityRecord.validation_status,
+        validation_errors: biodiversityRecord.validation_errors,
       },
 
-      // Social & Governance Metrics based on actual data
-      social_governance: {
-        community_engagement: {
-          programs_count: getMetricValueByYear(
-            metrics["Social - Community Engagement Programs (count)"],
-            currentYear,
-          ),
-          local_employment: getMetricValueByYear(
-            metrics["Social - Local Employment Rate (%)"],
-            currentYear,
-          ),
-          land_rights_complaints: getMetricValueByYear(
-            metrics["Social - Land Rights Complaints (count)"],
-            currentYear,
-          ),
-        },
-        governance_strength: {
-          land_use_policy: getMetricValueByYear(
-            metrics["Governance - Land Use Policy (yes/no)"],
-            currentYear,
-          ),
-          biodiversity_policy: getMetricValueByYear(
-            metrics["Governance - Biodiversity Policy (yes/no)"],
-            currentYear,
-          ),
-          compliance_audits: getMetricValueByYear(
-            metrics["Governance - Environmental Compliance Audits (count)"],
-            currentYear,
-          ),
-        },
+      // Summary statistics (pre-calculated from model or computed on the fly)
+      summary_statistics: {
+        ...biodiversityRecord.summary_stats,
+        ...keyStats, // override with fresh calculations
       },
 
-      // Carbon Emission Accounting
-      carbon_emission_accounting: carbonEmissionAccounting,
+      // GRI references
+      gri_references: biodiversityRecord.gri_references || [],
 
-      // ESG Metrics Data organized by category
-      esg_metrics: metricsByCategory,
+      // Metrics grouped by category (full details)
+      metrics_by_category: groupedMetrics,
 
-      // Graphs and Visualizations based on actual data
+      // Graphs and visualizations
       graphs: graphs,
 
-      // Key Statistics based on actual data
-      key_statistics: keyStats,
+      // Key performance indicators (simplified view)
+      key_performance_indicators: {
+        conservation_area: keyStats.total_conservation_area,
+        agricultural_area: keyStats.total_agricultural_area,
+        restored_area: keyStats.total_restored_area,
+        flora_species: keyStats.flora_species_count,
+        fauna_species: keyStats.fauna_species_count,
+        trees_planted_cumulative: keyStats.trees_planted_cumulative,
+        lpg_distributions: keyStats.lpg_distributions,
+        human_wildlife_conflicts: keyStats.human_wildlife_conflicts,
+      },
 
-      // Summary based on actual data
-      summary: {
-        data_availability: {
-          total_metrics: Object.keys(metrics).length,
-          years_covered: years.length,
-          carbon_data: !!carbonData,
-          ndvi_data:
-            carbonData?.yearly_data?.some((y) => y.monthly_breakdown) || false,
-        },
-        notable_metrics: {
-          forest_coverage:
-            deforestationAnalysis.forest_coverage.coverage_percent,
-          water_usage: getMetricValueByYear(
-            metrics["Water Usage - Irrigation Water Usage (million ML)"],
-            currentYear,
-          ),
-          incidents_count: getMetricValueByYear(
-            metrics[
-              "Environment Incidents (Sewage blockage, Stillage overflow, Illegal waste disposal, Out of spec emissions, Effluent spillage, Water loss)"
-            ],
-            currentYear,
-          ),
-        },
+      // Audit trail
+      audit: {
+        created_at: biodiversityRecord.created_at,
+        created_by: biodiversityRecord.created_by,
+        last_updated_at: biodiversityRecord.last_updated_at,
+        last_updated_by: biodiversityRecord.last_updated_by,
+        version: biodiversityRecord.version,
+        previous_version: biodiversityRecord.previous_version,
       },
     };
 
-    return data;
+    return response;
   } catch (error) {
     if (error instanceof AppError) {
       throw error;
