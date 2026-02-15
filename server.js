@@ -9,6 +9,8 @@ const esgDashbardRouter = require("./routers/esg_dashboard_router");
 const carbonEmissionRouter = require("./routers/carbon_emission_router");
 const biodiversityLandUseRouter = require("./routers/biodiversity_data_router");
 const cropYieldRouter = require("./routers/crop_yield_router");
+const irrigationEffRouter = require("./routers/irrigation_eff_router");
+const fmcRouter = require("./routers/fmc_router");
 const { errorMiddleware } = require("./utils/error_handler");
 const setupSwagger = require("./middlewares/swagger");
 
@@ -37,6 +39,8 @@ app.use("/api/v1/esg-dashboard", esgDashbardRouter);
 app.use("/api/v1/carbon-emission", carbonEmissionRouter);
 app.use("/api/v1/biodiversity-landuse", biodiversityLandUseRouter);
 app.use("/api/v1/crop-yield", cropYieldRouter);
+app.use("/api/v1/irrigation-efficiency", irrigationEffRouter);
+app.use("/api/v1/farm-compliance", fmcRouter);
 // Error middleware
 
 app.use(errorMiddleware);

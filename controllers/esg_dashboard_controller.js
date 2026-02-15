@@ -102,7 +102,7 @@ const getIrrigationWaterRisk = asyncHandler(async (req, res) => {
   const { companyId } = req.params;
   const { year } = req.query;
 
-  const data = await IrrigationWaterRiskData.getIrrigationWaterRiskData(
+  const data = await IrrigationWaterRiskData.getIrrigationEfficiencyAndWaterRisk(
     companyId,
     year ? parseInt(year) : null
   );

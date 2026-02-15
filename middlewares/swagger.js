@@ -2452,7 +2452,265 @@ const options = {
 
           required: ["company", "created_by"],
         },
+        YearlyData: {
+          type: "object",
+          properties: {
+            year: {
+              type: "string",
+              example: "2023",
+            },
+            fiscal_year: {
+              type: "number",
+              example: 2023,
+            },
+            value: {
+              type: "string",
+              example: "1.2",
+            },
+            numeric_value: {
+              type: "number",
+              example: 1.2,
+            },
+            unit: {
+              type: "string",
+              example: "million ML",
+            },
+            source: {
+              type: "string",
+              example: "Integrated Report 2023",
+            },
+            notes: {
+              type: "string",
+            },
+            added_by: {
+              type: "string",
+              example: "userObjectId",
+            },
+            added_at: {
+              type: "string",
+              format: "date-time",
+            },
+            last_updated_by: {
+              type: "string",
+            },
+            last_updated_at: {
+              type: "string",
+              format: "date-time",
+            },
+          },
+        },
 
+        IrrigationMetric: {
+          type: "object",
+          properties: {
+            category: {
+              type: "string",
+              enum: [
+                "irrigation_water",
+                "water_per_hectare",
+                "effluent_discharged",
+                "water_treatment",
+                "water_sources",
+                "forecast",
+                "risk",
+              ],
+            },
+            subcategory: {
+              type: "string",
+            },
+            metric_name: {
+              type: "string",
+            },
+            description: {
+              type: "string",
+            },
+            data_type: {
+              type: "string",
+              enum: ["yearly_series", "single_value", "list", "summary"],
+            },
+            yearly_data: {
+              type: "array",
+              items: {
+                $ref: "#/components/schemas/YearlyData",
+              },
+            },
+            single_value: {
+              type: "object",
+              properties: {
+                value: { type: "string" },
+                numeric_value: { type: "number" },
+                unit: { type: "string" },
+                source: { type: "string" },
+                notes: { type: "string" },
+                as_of_date: {
+                  type: "string",
+                  format: "date-time",
+                },
+              },
+            },
+            list_data: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  item: { type: "string" },
+                  count: { type: "number" },
+                  details: { type: "string" },
+                  source: { type: "string" },
+                  added_at: {
+                    type: "string",
+                    format: "date-time",
+                  },
+                },
+              },
+            },
+            summary_value: {
+              type: "object",
+              properties: {
+                key_metric: { type: "string" },
+                latest_value: { type: "string" },
+                trend: { type: "string" },
+                notes: { type: "string" },
+                as_of_date: {
+                  type: "string",
+                  format: "date-time",
+                },
+              },
+            },
+            is_active: {
+              type: "boolean",
+            },
+            created_at: {
+              type: "string",
+              format: "date-time",
+            },
+            created_by: {
+              type: "string",
+            },
+            updated_at: {
+              type: "string",
+              format: "date-time",
+            },
+            last_updated_by: {
+              type: "string",
+            },
+          },
+        },
+        IrrigationEfficiencyData: {
+          type: "object",
+          properties: {
+            company: {
+              type: "string",
+              example: "companyObjectId",
+            },
+            data_period_start: {
+              type: "string",
+              example: "2022",
+            },
+            data_period_end: {
+              type: "string",
+              example: "2025",
+            },
+            original_source: {
+              type: "string",
+            },
+            source_files: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  name: { type: "string" },
+                  year: { type: "string" },
+                  pages: { type: "string" },
+                  type: {
+                    type: "string",
+                    enum: [
+                      "annual_report",
+                      "integrated_report",
+                      "sustainability_report",
+                      "other",
+                    ],
+                  },
+                },
+              },
+            },
+            import_source: {
+              type: "string",
+            },
+            source_file_name: {
+              type: "string",
+            },
+            data_quality_score: {
+              type: "number",
+            },
+            verification_status: {
+              type: "string",
+              enum: [
+                "unverified",
+                "pending_review",
+                "verified",
+                "audited",
+                "disputed",
+              ],
+            },
+            validation_status: {
+              type: "string",
+            },
+            metrics: {
+              type: "array",
+              items: {
+                $ref: "#/components/schemas/IrrigationMetric",
+              },
+            },
+            summary_stats: {
+              type: "object",
+              properties: {
+                total_irrigation_water: { type: "number" },
+                avg_water_per_hectare: { type: "number" },
+                total_effluent_discharged: { type: "number" },
+                avg_water_treatment: { type: "number" },
+                water_sources_count: { type: "number" },
+                last_updated: {
+                  type: "string",
+                  format: "date-time",
+                },
+              },
+            },
+            created_at: {
+              type: "string",
+              format: "date-time",
+            },
+            created_by: {
+              type: "string",
+            },
+            last_updated_at: {
+              type: "string",
+              format: "date-time",
+            },
+            version: {
+              type: "number",
+            },
+            is_active: {
+              type: "boolean",
+            },
+          },
+        },
+        IrrigationEfficiencyResponse: {
+          type: "object",
+          properties: {
+            success: {
+              type: "boolean",
+              example: true,
+            },
+            message: {
+              type: "string",
+              example: "Irrigation efficiency data created successfully",
+            },
+            data: {
+              $ref: "#/components/schemas/IrrigationEfficiencyData",
+            },
+          },
+        },
         AuthProvider: {
           type: "object",
           properties: {
@@ -2473,7 +2731,204 @@ const options = {
           },
           required: ["provider", "provider_user_id"],
         },
-
+        ComplianceMetric: {
+          type: "object",
+          properties: {
+            category: {
+              type: "string",
+              enum: [
+                "training_hours_executive",
+                "training_hours_senior_management",
+                "training_hours_other_employees",
+                "training_focus_areas",
+                "training_delivery_methods",
+                "compliance_programs",
+                "forecast",
+                "risk",
+              ],
+            },
+            subcategory: {
+              type: "string",
+            },
+            metric_name: {
+              type: "string",
+              example: "Executive Training Hours",
+            },
+            description: {
+              type: "string",
+            },
+            data_type: {
+              type: "string",
+              enum: ["yearly_series", "single_value", "list", "summary"],
+            },
+            yearly_data: {
+              type: "array",
+              items: {
+                $ref: "#/components/schemas/YearlyData",
+              },
+            },
+            single_value: {
+              type: "object",
+              properties: {
+                value: { type: "string" },
+                numeric_value: { type: "number" },
+                unit: { type: "string" },
+                source: { type: "string" },
+                notes: { type: "string" },
+                as_of_date: {
+                  type: "string",
+                  format: "date-time",
+                },
+              },
+            },
+            list_data: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  item: { type: "string" },
+                  count: { type: "number" },
+                  details: { type: "string" },
+                  source: { type: "string" },
+                  added_at: {
+                    type: "string",
+                    format: "date-time",
+                  },
+                },
+              },
+            },
+            summary_value: {
+              type: "object",
+              properties: {
+                key_metric: { type: "string" },
+                latest_value: { type: "string" },
+                trend: { type: "string" },
+                notes: { type: "string" },
+                as_of_date: {
+                  type: "string",
+                  format: "date-time",
+                },
+              },
+            },
+            is_active: {
+              type: "boolean",
+            },
+            created_at: {
+              type: "string",
+              format: "date-time",
+            },
+            created_by: {
+              type: "string",
+            },
+            updated_at: {
+              type: "string",
+              format: "date-time",
+            },
+            last_updated_by: {
+              type: "string",
+            },
+          },
+        },
+        FarmManagementCompliance: {
+          type: "object",
+          properties: {
+            company: {
+              type: "string",
+              example: "companyObjectId",
+            },
+            data_period_start: {
+              type: "string",
+              example: "2022",
+            },
+            data_period_end: {
+              type: "string",
+              example: "2025",
+            },
+            original_source: {
+              type: "string",
+            },
+            source_files: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  name: { type: "string" },
+                  year: { type: "string" },
+                  pages: { type: "string" },
+                  type: {
+                    type: "string",
+                    enum: [
+                      "annual_report",
+                      "integrated_report",
+                      "sustainability_report",
+                      "other",
+                    ],
+                  },
+                },
+              },
+            },
+            import_source: {
+              type: "string",
+            },
+            data_quality_score: {
+              type: "number",
+            },
+            verification_status: {
+              type: "string",
+              enum: [
+                "unverified",
+                "pending_review",
+                "verified",
+                "audited",
+                "disputed",
+              ],
+            },
+            validation_status: {
+              type: "string",
+            },
+            metrics: {
+              type: "array",
+              items: {
+                $ref: "#/components/schemas/ComplianceMetric",
+              },
+            },
+            summary_stats: {
+              type: "object",
+              properties: {
+                total_executive_hours: { type: "number" },
+                total_senior_management_hours: { type: "number" },
+                total_other_employees_hours: { type: "number" },
+                avg_executive_hours: { type: "number" },
+                avg_senior_management_hours: { type: "number" },
+                avg_other_employees_hours: { type: "number" },
+                training_focus_areas_count: { type: "number" },
+                training_delivery_methods_count: { type: "number" },
+                compliance_programs_count: { type: "number" },
+                last_updated: {
+                  type: "string",
+                  format: "date-time",
+                },
+              },
+            },
+            created_at: {
+              type: "string",
+              format: "date-time",
+            },
+            created_by: {
+              type: "string",
+            },
+            last_updated_at: {
+              type: "string",
+              format: "date-time",
+            },
+            version: {
+              type: "number",
+            },
+            is_active: {
+              type: "boolean",
+            },
+          },
+        },
         Error: {
           type: "object",
           properties: {
@@ -2526,6 +2981,8 @@ const options = {
     "./routers/carbon_emission_router.js", // adjust path if needed
     "./routers/biodiversity_data_router.js", // adjust path if needed
     "./routers/crop_yield_router.js", // adjust path if needed
+    "./routers/irrigation_eff_router.js", // adjust path if needed
+    "./routers/fmc_router.js", // adjust path if needed
   ],
 };
 

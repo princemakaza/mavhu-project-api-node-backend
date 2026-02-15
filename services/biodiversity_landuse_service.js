@@ -540,19 +540,14 @@ async function getBiodiversityLandUseData(
         ...biodiversityRecord.summary_stats,
         ...keyStats, // fresh calculations override stored stats
       },
-
       // GRI references
       gri_references: biodiversityRecord.gri_references || [],
-
       // Metrics grouped by category (full details, all refs populated)
       metrics_by_category: groupedMetrics,
-
       // All raw metrics (flat array, all refs populated)
       all_metrics: metrics,
-
       // Graphs and visualizations
       graphs: graphs,
-
       // Key performance indicators (simplified view)
       key_performance_indicators: {
         conservation_area: keyStats.total_conservation_area,
@@ -564,7 +559,6 @@ async function getBiodiversityLandUseData(
         lpg_distributions: keyStats.lpg_distributions,
         human_wildlife_conflicts: keyStats.human_wildlife_conflicts,
       },
-
       // Audit trail (all refs populated)
       audit: {
         created_at: biodiversityRecord.created_at,
