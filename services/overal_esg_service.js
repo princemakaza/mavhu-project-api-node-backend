@@ -1,5 +1,6 @@
 const ESGData = require("../models/esg_data_model");
 const Company = require("../models/company_model");
+const OverallESGData = require("../models/overall_esg_model"); // Added
 const AppError = require("../utils/app_error");
 
 // Version constants from environment variables
@@ -468,6 +469,12 @@ async function getOverallESGScoreData(companyId, year = null) {
       throw new AppError("Company not found", 404, "NOT_FOUND");
     }
 
+    // Fetch the active OverallESGData record (dedicated model)
+    const overallESGRecord = await OverallESGData.findOne({
+      company: companyId,
+      is_active: true,
+    }).lean();
+
     // Get complete ESG data
     const esgData = await getCompleteESGData(companyId, year);
 
@@ -509,6 +516,9 @@ async function getOverallESGScoreData(companyId, year = null) {
         gee_adapter: GEE_ADAPTER_VERSION,
         last_updated: new Date().toISOString(),
       },
+
+      // Include the full OverallESGData record (dedicated model)
+      overall_esg_record: overallESGRecord || null,
 
       // Complete company information
       company: {

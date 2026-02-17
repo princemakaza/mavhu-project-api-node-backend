@@ -1,7 +1,12 @@
-const ESGData = require("../models/esg_data_model");
 const Company = require("../models/company_model");
+const ESGData = require("../models/esg_data_model");
+const HealthSafetyData = require("../models/health_safety_model"); // Added
 const AppError = require("../utils/app_error");
-const mongoose = require("mongoose");
+
+// Version constants
+const API_VERSION = process.env.API_VERSION || "1.0.0";
+const CALCULATION_VERSION = process.env.CALCULATION_VERSION || "1.0.0";
+const GEE_ADAPTER_VERSION = process.env.GEE_ADAPTER_VERSION || "1.0.0";
 
 /**
  * Helper function to extract metric values by name with proper error handling
@@ -246,11 +251,6 @@ async function getSocialMetrics(companyId, years = []) {
   }
 }
 
-// Version constants
-const API_VERSION = process.env.API_VERSION || "1.0.0";
-const CALCULATION_VERSION = process.env.CALCULATION_VERSION || "1.0.0";
-const GEE_ADAPTER_VERSION = process.env.GEE_ADAPTER_VERSION || "1.0.0";
-
 /**
  * Health & Safety API - Enhanced with all requirements
  */
@@ -282,7 +282,13 @@ async function getHealthSafetyData(companyId, year = null) {
       throw new AppError("Company not found", 404, "NOT_FOUND");
     }
 
-    // Health & Safety specific metrics
+    // Fetch the active HealthSafetyData record (dedicated model)
+    const healthDataRecord = await HealthSafetyData.findOne({
+      company: companyId,
+      is_active: true,
+    }).lean();
+
+    // Health & Safety specific metrics (from ESGData)
     const healthSafetyMetricNames = [
       "Work-related Injuries - Lost Time Injury Frequency Rate (LTIFR)",
       "Safety, Health, and Environment Committee Meetings (Agriculture)",
@@ -296,14 +302,14 @@ async function getHealthSafetyData(companyId, year = null) {
       "Health & Safety - Personal protective equipment compliance",
     ];
 
-    // Get health & safety metrics
+    // Get health & safety metrics from ESGData
     const healthSafetyMetrics = await getMetricsByNames(
       companyId,
       healthSafetyMetricNames,
       targetYears,
     );
 
-    // Get ALL SOCIAL ESG metrics for the selected year
+    // Get ALL SOCIAL ESG metrics for the selected year from ESGData
     const socialMetrics = await getSocialMetrics(companyId, targetYears);
 
     // Calculate key metrics for the target year
@@ -386,6 +392,9 @@ async function getHealthSafetyData(companyId, year = null) {
         timestamp: new Date().toISOString(),
         requested_year: targetYear,
       },
+
+      // Include the full HealthSafetyData record (dedicated model)
+      health_safety_data: healthDataRecord || null,
 
       // Year Information
       year_data: {

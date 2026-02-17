@@ -1,98 +1,30 @@
-const ESGData = require("../models/esg_data_model");
 const Company = require("../models/company_model");
+const WasteManagementData = require("../models/waste_management_model");
 const AppError = require("../utils/app_error");
-const mongoose = require("mongoose");
+
+// Version constants
+const API_VERSION = process.env.API_VERSION || "1.0.0";
+const CALCULATION_VERSION = process.env.CALCULATION_VERSION || "1.0.0";
+const GEE_ADAPTER_VERSION = process.env.GEE_ADAPTER_VERSION || "1.0.0";
 
 /**
- * Helper function to extract metric values by name with proper error handling
+ * Helper function to extract a numeric value from a metric by name and year
  */
-async function getMetricsByNames(companyId, metricNames, years = []) {
-  try {
-    const query = {
-      company: companyId,
-      is_active: true,
-    };
-
-    if (metricNames && metricNames.length > 0) {
-      query["metrics.metric_name"] = { $in: metricNames };
-    }
-
-    if (years.length > 0) {
-      query["metrics.values.year"] = { $in: years };
-    }
-
-    const esgData = await ESGData.find(query)
-      .populate("company", "name industry country")
-      .lean();
-
-    // Extract and organize metrics
-    const metrics = {};
-
-    esgData.forEach((data) => {
-      data.metrics.forEach((metric) => {
-        if (!metricNames || metricNames.includes(metric.metric_name)) {
-          if (!metrics[metric.metric_name]) {
-            metrics[metric.metric_name] = {
-              name: metric.metric_name,
-              category: metric.category,
-              unit: metric.unit,
-              description: metric.description,
-              values: [],
-            };
-          }
-
-          metric.values.forEach((value) => {
-            if (years.length === 0 || years.includes(value.year)) {
-              metrics[metric.metric_name].values.push({
-                year: value.year,
-                value: value.value,
-                numeric_value: value.numeric_value,
-                source_notes: value.source_notes,
-                source_file: data.source_file_name,
-                verification_status: data.verification_status,
-              });
-            }
-          });
-        }
-      });
-    });
-
-    // Sort values by year
-    Object.keys(metrics).forEach((metricName) => {
-      if (
-        metrics[metricName].values &&
-        Array.isArray(metrics[metricName].values)
-      ) {
-        metrics[metricName].values.sort((a, b) => a.year - b.year);
-      }
-    });
-
-    return metrics;
-  } catch (error) {
-    throw new AppError(
-      `Error fetching metrics: ${error.message}`,
-      500,
-      "METRICS_FETCH_ERROR",
-    );
-  }
+function getMetricValue(metrics, metricName, year) {
+  if (!metrics || !Array.isArray(metrics)) return 0;
+  const metric = metrics.find((m) => m.metric_name === metricName);
+  if (!metric || !metric.yearly_data || !Array.isArray(metric.yearly_data))
+    return 0;
+  const yearly = metric.yearly_data.find((yd) => yd.year === String(year));
+  if (!yearly) return 0;
+  return yearly.numeric_value || parseFloat(yearly.value) || 0;
 }
 
 /**
- * Helper function to get unique years from metrics
+ * Helper function to extract values for multiple years from a metric
  */
-function getUniqueYearsFromMetrics(metrics, year = null) {
-  if (year) return [year];
-
-  const allYears = new Set();
-  Object.values(metrics).forEach((metric) => {
-    if (metric.values && Array.isArray(metric.values)) {
-      metric.values.forEach((value) => {
-        allYears.add(value.year);
-      });
-    }
-  });
-
-  return Array.from(allYears).sort();
+function getMetricValuesForYears(metrics, metricName, years) {
+  return years.map((year) => getMetricValue(metrics, metricName, year));
 }
 
 /**
@@ -104,169 +36,23 @@ function calculatePercentageChange(initialValue, finalValue) {
 }
 
 /**
- * Helper function to get metric value by year
+ * Helper function to calculate trend based on first and last year values
  */
-function getMetricValueByYear(metric, year) {
-  if (!metric || !metric.values || !Array.isArray(metric.values)) return null;
-  const value = metric.values.find((v) => v.year === year);
-  return value ? value.numeric_value || parseFloat(value.value) || 0 : null;
-}
-
-/**
- * Helper function to calculate trends
- */
-function calculateTrend(values, years) {
-  if (
-    !values ||
-    !values.values ||
-    !Array.isArray(values.values) ||
-    values.values.length < 2
-  )
-    return "stable";
-
-  const firstYear = Math.min(...years);
-  const lastYear = Math.max(...years);
-
-  const firstValue = getMetricValueByYear(values, firstYear);
-  const lastValue = getMetricValueByYear(values, lastYear);
-
-  if (firstValue === null || lastValue === null) return "stable";
-
+function calculateTrend(metrics, metricName, years) {
+  const values = getMetricValuesForYears(metrics, metricName, years).filter(
+    (v) => v !== null && v !== undefined,
+  );
+  if (values.length < 2) return "stable";
+  const firstValue = values[0];
+  const lastValue = values[values.length - 1];
   const change = calculatePercentageChange(firstValue, lastValue);
-
   if (change > 5) return "improving";
   if (change < -5) return "declining";
   return "stable";
 }
 
 /**
- * Helper function to extract ENVIRONMENTAL ESG metrics for a company for specific years
- */
-async function getEnvironmentalMetrics(companyId, years = []) {
-  try {
-    const query = {
-      company: companyId,
-      is_active: true,
-      "metrics.category": "environmental",
-    };
-
-    if (years.length > 0) {
-      query["metrics.values.year"] = { $in: years };
-    }
-
-    const esgData = await ESGData.find(query)
-      .populate("company", "name industry country")
-      .lean();
-
-    // Organize metrics by category and year
-    const environmentalMetrics = {
-      environmental: {},
-      metadata: {
-        total_metrics: 0,
-        data_range: [],
-        verification_status: {},
-        years_requested: years,
-        environmental_categories: {},
-      },
-    };
-
-    esgData.forEach((data) => {
-      // Track metadata
-      if (data.reporting_period_start && data.reporting_period_end) {
-        environmentalMetrics.metadata.data_range.push({
-          start: data.reporting_period_start,
-          end: data.reporting_period_end,
-          source: data.data_source || "Manual Entry",
-          verification_status: data.verification_status,
-          data_quality_score: data.data_quality_score,
-        });
-      }
-
-      // Count verification status
-      environmentalMetrics.metadata.verification_status[
-        data.verification_status
-      ] =
-        (environmentalMetrics.metadata.verification_status[
-          data.verification_status
-        ] || 0) + 1;
-
-      data.metrics.forEach((metric) => {
-        // Only process environmental metrics
-        if (
-          metric.category &&
-          metric.category.toLowerCase() === "environmental"
-        ) {
-          // Track categories for environmental metrics
-          const metricName = metric.metric_name;
-          if (!environmentalMetrics.environmental[metricName]) {
-            environmentalMetrics.environmental[metricName] = {
-              name: metricName,
-              unit: metric.unit,
-              description: metric.description,
-              category: metric.category,
-              values: [],
-              verification_status: data.verification_status,
-              data_source: data.data_source,
-            };
-            environmentalMetrics.metadata.total_metrics++;
-
-            // Track categories
-            const categoryKey = metricName.split(" - ")[0] || "Other";
-            environmentalMetrics.metadata.environmental_categories[
-              categoryKey
-            ] =
-              (environmentalMetrics.metadata.environmental_categories[
-                categoryKey
-              ] || 0) + 1;
-          }
-
-          metric.values.forEach((value) => {
-            if (years.length === 0 || years.includes(value.year)) {
-              environmentalMetrics.environmental[metricName].values.push({
-                year: value.year,
-                value: value.value,
-                numeric_value: value.numeric_value,
-                source_notes: value.source_notes,
-                added_at: value.added_at,
-                added_by: value.added_by,
-                verification_status: data.verification_status,
-              });
-            }
-          });
-        }
-      });
-    });
-
-    // Sort values by year for each metric
-    if (
-      environmentalMetrics.environmental &&
-      typeof environmentalMetrics.environmental === "object"
-    ) {
-      Object.keys(environmentalMetrics.environmental).forEach((metricName) => {
-        const metric = environmentalMetrics.environmental[metricName];
-        if (metric && metric.values && Array.isArray(metric.values)) {
-          metric.values.sort((a, b) => a.year - b.year);
-        }
-      });
-    }
-
-    return environmentalMetrics;
-  } catch (error) {
-    throw new AppError(
-      `Error fetching environmental metrics: ${error.message}`,
-      500,
-      "ENVIRONMENTAL_METRICS_FETCH_ERROR",
-    );
-  }
-}
-
-// Version constants
-const API_VERSION = process.env.API_VERSION || "1.0.0";
-const CALCULATION_VERSION = process.env.CALCULATION_VERSION || "1.0.0";
-const GEE_ADAPTER_VERSION = process.env.GEE_ADAPTER_VERSION || "1.0.0";
-
-/**
- * 8. Waste Management API - Returns only environmental ESG data
+ * Waste Management Data API
  */
 async function getWasteManagementData(companyId, year = null) {
   try {
@@ -288,15 +74,30 @@ async function getWasteManagementData(companyId, year = null) {
       );
     }
 
-    const targetYears = [targetYear];
-
-    // Get full company details
+    // Get company details
     const company = await Company.findById(companyId).lean();
     if (!company) {
       throw new AppError("Company not found", 404, "NOT_FOUND");
     }
 
-    // Waste-specific metrics
+    // Fetch the active WasteManagementData record
+    const wasteDataRecord = await WasteManagementData.findOne({
+      company: companyId,
+      is_active: true,
+    }).lean();
+
+    // If no data, we still proceed with zeros, but include null record
+    const metrics = wasteDataRecord?.metrics || [];
+
+    // Trend years (last 4 years including target)
+    const trendYears = [
+      targetYear - 3,
+      targetYear - 2,
+      targetYear - 1,
+      targetYear,
+    ].filter((y) => y >= 2020);
+
+    // Waste‑specific metric names (as expected from imported data)
     const wasteMetricNames = [
       "Waste Management - Recycled waste (excl. Boiler Ash) (tons)",
       "Waste Management - Disposed waste (excl. Boiler Ash) (tons)",
@@ -310,66 +111,30 @@ async function getWasteManagementData(companyId, year = null) {
       "Waste Management - Composted waste (tons)",
     ];
 
-    // Get waste metrics
-    const wasteMetrics = await getMetricsByNames(
-      companyId,
-      wasteMetricNames,
-      targetYears,
+    // Extract values for the target year
+    const recycled = getMetricValue(
+      metrics,
+      "Waste Management - Recycled waste (excl. Boiler Ash) (tons)",
+      targetYear,
     );
-
-    // Get ENVIRONMENTAL ESG metrics for the selected year
-    const environmentalMetrics = await getEnvironmentalMetrics(
-      companyId,
-      targetYears,
+    const disposed = getMetricValue(
+      metrics,
+      "Waste Management - Disposed waste (excl. Boiler Ash) (tons)",
+      targetYear,
     );
-
-    // Calculate key metrics for the target year
-    const recycled =
-      getMetricValueByYear(
-        wasteMetrics[
-          "Waste Management - Recycled waste (excl. Boiler Ash) (tons)"
-        ],
-        targetYear,
-      ) || 0;
-
-    const disposed =
-      getMetricValueByYear(
-        wasteMetrics[
-          "Waste Management - Disposed waste (excl. Boiler Ash) (tons)"
-        ],
-        targetYear,
-      ) || 0;
-
     const totalWaste = recycled + disposed;
     const recyclingRate = totalWaste > 0 ? (recycled / totalWaste) * 100 : 0;
 
-    // Calculate hazardous waste percentage
-    const hazardousWaste =
-      getMetricValueByYear(
-        wasteMetrics[
-          "Environment Incidents - Waste streams produced - Hazardous waste (tons)"
-        ],
-        targetYear,
-      ) || 0;
+    const hazardousWaste = getMetricValue(
+      metrics,
+      "Environment Incidents - Waste streams produced - Hazardous waste (tons)",
+      targetYear,
+    );
 
-    // Get waste incidents count from actual metrics if available
-    let wasteIncidentsCount = 0;
-    const wasteIncidentsMetrics =
-      environmentalMetrics.environmental[
-        "Environment Incidents - Number of incidents"
-      ] || environmentalMetrics.environmental["Total Environmental Incidents"];
+    // Waste incidents – we can derive from a dedicated metric if available
+    const wasteIncidentsCount = 0; // Placeholder; can be added later
 
-    if (wasteIncidentsMetrics && wasteIncidentsMetrics.values) {
-      const incidentValue = wasteIncidentsMetrics.values.find(
-        (v) => v.year === targetYear,
-      );
-      if (incidentValue) {
-        wasteIncidentsCount =
-          incidentValue.numeric_value || parseInt(incidentValue.value) || 0;
-      }
-    }
-
-    // Dummy data for incidents details
+    // Dummy incident details (can be replaced with real data)
     const wasteIncidents = [
       {
         id: 1,
@@ -419,7 +184,18 @@ async function getWasteManagementData(companyId, year = null) {
       ],
     };
 
-    // Prepare response data
+    // Data quality score (simple completeness based on available metrics)
+    const availableMetrics = wasteMetricNames.filter(
+      (name) =>
+        metrics.some((m) => m.metric_name === name) &&
+        getMetricValue(metrics, name, targetYear) > 0,
+    ).length;
+    const completenessScore =
+      wasteMetricNames.length > 0
+        ? Math.round((availableMetrics / wasteMetricNames.length) * 100)
+        : 0;
+
+    // Prepare response
     const response = {
       // API Metadata
       api_info: {
@@ -431,15 +207,22 @@ async function getWasteManagementData(companyId, year = null) {
         requested_year: targetYear,
       },
 
+      // Include the full WasteManagementData record
+      waste_management_data: wasteDataRecord || null,
+
       // Year Information
       year_data: {
         requested_year: targetYear,
-        data_available: environmentalMetrics.metadata.total_metrics > 0,
-        environmental_metrics_count:
-          environmentalMetrics.metadata.total_metrics,
-        verification_summary: environmentalMetrics.metadata.verification_status,
-        environmental_categories:
-          environmentalMetrics.metadata.environmental_categories,
+        data_available: !!wasteDataRecord,
+        environmental_metrics_count: metrics.length,
+        verification_summary: {
+          [wasteDataRecord?.verification_status || "unverified"]: 1,
+        },
+        environmental_categories: metrics.reduce((acc, m) => {
+          const cat = m.category || "other";
+          acc[cat] = (acc[cat] || 0) + 1;
+          return acc;
+        }, {}),
       },
 
       // Company Information
@@ -477,10 +260,9 @@ async function getWasteManagementData(companyId, year = null) {
             label: "Recycling Rate",
             description: "Percentage of waste that gets recycled",
             trend: calculateTrend(
-              wasteMetrics[
-                "Waste Management - Recycled waste (excl. Boiler Ash) (tons)"
-              ],
-              [targetYear, targetYear - 1],
+              metrics,
+              "Waste Management - Recycled waste (excl. Boiler Ash) (tons)",
+              trendYears,
             ),
             industry_average: "45%",
             year: targetYear,
@@ -527,13 +309,11 @@ async function getWasteManagementData(companyId, year = null) {
         categories: [
           {
             name: "Recyclable",
-            amount:
-              getMetricValueByYear(
-                wasteMetrics[
-                  "Environment Incidents - Waste streams produced - Recyclable waste (tons)"
-                ],
-                targetYear,
-              ) || 0,
+            amount: getMetricValue(
+              metrics,
+              "Environment Incidents - Waste streams produced - Recyclable waste (tons)",
+              targetYear,
+            ),
             unit: "tons",
             color: "#3498db",
             description: "Materials that can be processed and reused",
@@ -550,13 +330,11 @@ async function getWasteManagementData(companyId, year = null) {
           },
           {
             name: "General",
-            amount:
-              getMetricValueByYear(
-                wasteMetrics[
-                  "Environment Incidents - Waste streams produced - General Waste (tons)"
-                ],
-                targetYear,
-              ) || 0,
+            amount: getMetricValue(
+              metrics,
+              "Environment Incidents - Waste streams produced - General Waste (tons)",
+              targetYear,
+            ),
             unit: "tons",
             color: "#95a5a6",
             description: "Everyday non-recyclable waste",
@@ -564,13 +342,11 @@ async function getWasteManagementData(companyId, year = null) {
           },
           {
             name: "Ash",
-            amount:
-              getMetricValueByYear(
-                wasteMetrics[
-                  "Environment Incidents - Waste streams produced - Boiler ash (tons)"
-                ],
-                targetYear,
-              ) || 0,
+            amount: getMetricValue(
+              metrics,
+              "Environment Incidents - Waste streams produced - Boiler ash (tons)",
+              targetYear,
+            ),
             unit: "tons",
             color: "#2c3e50",
             description: "Residue from burning processes",
@@ -636,53 +412,102 @@ async function getWasteManagementData(companyId, year = null) {
         ],
       },
 
-      // ENVIRONMENTAL ESG Metrics for the selected year
+      // Environmental Metrics (all metrics from WasteManagementData)
       environmental_metrics: {
         year: targetYear,
-        total_metrics: environmentalMetrics.metadata.total_metrics,
-        metrics_by_category:
-          environmentalMetrics.metadata.environmental_categories,
-        metrics: environmentalMetrics.environmental,
+        total_metrics: metrics.length,
+        metrics_by_category: metrics.reduce((acc, m) => {
+          const cat = m.category || "other";
+          acc[cat] = (acc[cat] || 0) + 1;
+          return acc;
+        }, {}),
+        metrics: metrics.reduce((acc, m) => {
+          acc[m.metric_name] = {
+            name: m.metric_name,
+            category: m.category,
+            subcategory: m.subcategory,
+            unit: m.yearly_data?.[0]?.unit || "",
+            description: m.description,
+            values: (m.yearly_data || []).map((yd) => ({
+              year: yd.year,
+              value: yd.value,
+              numeric_value: yd.numeric_value,
+              source_notes: yd.source || yd.notes,
+              added_at: yd.added_at,
+              last_updated_at: yd.last_updated_at,
+            })),
+          };
+          return acc;
+        }, {}),
         metadata: {
-          data_range: environmentalMetrics.metadata.data_range,
-          verification_status:
-            environmentalMetrics.metadata.verification_status,
+          data_range: [
+            {
+              start: wasteDataRecord?.data_period_start,
+              end: wasteDataRecord?.data_period_end,
+              source: wasteDataRecord?.source_file_name,
+              verification_status: wasteDataRecord?.verification_status,
+              data_quality_score: wasteDataRecord?.data_quality_score,
+            },
+          ],
+          verification_status: {
+            [wasteDataRecord?.verification_status || "unverified"]: 1,
+          },
           years_requested: [targetYear],
         },
       },
 
-      // Waste-specific metrics for detailed analysis
+      // Detailed waste metrics (raw values for the target year)
       detailed_waste_metrics: {
         year: targetYear,
-        metrics: wasteMetrics,
+        metrics: wasteMetricNames.reduce((acc, name) => {
+          acc[name] = getMetricValue(metrics, name, targetYear);
+          return acc;
+        }, {}),
       },
 
       // 6 Graphs for Dashboard
       graphs: {
         year: targetYear,
-        // 1. Line graph: Waste generation trend over time (last 4 years)
         waste_trend_over_time: {
           type: "line",
           title: "How Our Waste Generation Has Changed",
           description: "Tracking our waste over the years",
-          labels: [targetYear - 3, targetYear - 2, targetYear - 1, targetYear],
+          labels: trendYears,
           datasets: [
             {
               label: "Total Waste (tons)",
-              data: [2200, 2400, 2100, totalWaste || 2300],
+              data: trendYears.map(
+                (y) =>
+                  getMetricValue(
+                    metrics,
+                    "Waste Management - Recycled waste (excl. Boiler Ash) (tons)",
+                    y,
+                  ) +
+                    getMetricValue(
+                      metrics,
+                      "Waste Management - Disposed waste (excl. Boiler Ash) (tons)",
+                      y,
+                    ) || 0,
+              ),
               borderColor: "#e74c3c",
               backgroundColor: "rgba(231, 76, 60, 0.1)",
             },
             {
               label: "Recycled Waste (tons)",
-              data: [880, 960, 840, recycled || 920],
+              data: trendYears.map(
+                (y) =>
+                  getMetricValue(
+                    metrics,
+                    "Waste Management - Recycled waste (excl. Boiler Ash) (tons)",
+                    y,
+                  ) || 0,
+              ),
               borderColor: "#2ecc71",
               backgroundColor: "rgba(46, 204, 113, 0.1)",
             },
           ],
         },
 
-        // 2. Pie chart: What types of waste we produce
         waste_breakdown: {
           type: "pie",
           title: "Types of Waste We Produce",
@@ -691,26 +516,23 @@ async function getWasteManagementData(companyId, year = null) {
           datasets: [
             {
               data: [
-                getMetricValueByYear(
-                  wasteMetrics[
-                    "Environment Incidents - Waste streams produced - Recyclable waste (tons)"
-                  ],
+                getMetricValue(
+                  metrics,
+                  "Environment Incidents - Waste streams produced - Recyclable waste (tons)",
                   targetYear,
                 ) || 25,
                 hazardousWaste || 5,
-                getMetricValueByYear(
-                  wasteMetrics[
-                    "Environment Incidents - Waste streams produced - General Waste (tons)"
-                  ],
+                getMetricValue(
+                  metrics,
+                  "Environment Incidents - Waste streams produced - General Waste (tons)",
                   targetYear,
                 ) || 20,
-                getMetricValueByYear(
-                  wasteMetrics[
-                    "Environment Incidents - Waste streams produced - Boiler ash (tons)"
-                  ],
+                getMetricValue(
+                  metrics,
+                  "Environment Incidents - Waste streams produced - Boiler ash (tons)",
                   targetYear,
                 ) || 10,
-                totalWaste * 0.1 || 5, // Estimated other
+                totalWaste * 0.1 || 5,
               ],
               backgroundColor: [
                 "#3498db",
@@ -723,7 +545,6 @@ async function getWasteManagementData(companyId, year = null) {
           ],
         },
 
-        // 3. Bar graph: How we handle different waste streams
         waste_handling_methods: {
           type: "bar",
           title: "How We Handle Different Waste Types",
@@ -741,16 +562,19 @@ async function getWasteManagementData(companyId, year = null) {
               data: [
                 recycled || 920,
                 disposed || 1380,
-                getMetricValueByYear(
-                  wasteMetrics["Waste Management - Landfill waste (tons)"],
+                getMetricValue(
+                  metrics,
+                  "Waste Management - Landfill waste (tons)",
                   targetYear,
                 ) || 600,
-                getMetricValueByYear(
-                  wasteMetrics["Waste Management - Incinerated waste (tons)"],
+                getMetricValue(
+                  metrics,
+                  "Waste Management - Incinerated waste (tons)",
                   targetYear,
                 ) || 300,
-                getMetricValueByYear(
-                  wasteMetrics["Waste Management - Composted waste (tons)"],
+                getMetricValue(
+                  metrics,
+                  "Waste Management - Composted waste (tons)",
                   targetYear,
                 ) || 200,
               ],
@@ -765,7 +589,6 @@ async function getWasteManagementData(companyId, year = null) {
           ],
         },
 
-        // 4. Scatter plot: Waste vs Recycling Performance
         waste_vs_recycling: {
           type: "scatter",
           title: "Waste Generation vs Recycling Rate",
@@ -800,7 +623,6 @@ async function getWasteManagementData(companyId, year = null) {
           ],
         },
 
-        // 5. Bar graph: Monthly waste generation for the year
         monthly_waste_pattern: {
           type: "bar",
           title: "Monthly Waste Patterns",
@@ -841,7 +663,6 @@ async function getWasteManagementData(companyId, year = null) {
           ],
         },
 
-        // 6. Radar chart: Waste management performance areas
         waste_performance_radar: {
           type: "radar",
           title: "Waste Management Performance Areas",
@@ -904,12 +725,27 @@ async function getWasteManagementData(companyId, year = null) {
       // Data Quality Information
       data_quality: {
         year: targetYear,
-        verification_status: environmentalMetrics.metadata.verification_status,
-        data_range: environmentalMetrics.metadata.data_range,
-        total_metrics: environmentalMetrics.metadata.total_metrics,
-        last_updated: new Date().toISOString(),
+        completeness_score: completenessScore,
+        verified_metrics: availableMetrics,
+        total_expected_metrics: wasteMetricNames.length,
+        verification_status:
+          completenessScore > 80
+            ? "good"
+            : completenessScore > 50
+              ? "moderate"
+              : "poor",
         notes:
-          "Environmental metrics only - social and governance data excluded",
+          completenessScore < 100
+            ? `Missing ${wasteMetricNames.length - availableMetrics} waste metrics`
+            : "All waste metrics available",
+        waste_data_coverage: `${availableMetrics}/${wasteMetricNames.length} metrics`,
+        data_range: [
+          {
+            start: wasteDataRecord?.data_period_start,
+            end: wasteDataRecord?.data_period_end,
+          },
+        ],
+        last_updated: new Date().toISOString(),
       },
     };
 

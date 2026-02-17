@@ -1,7 +1,12 @@
-const ESGData = require("../models/esg_data_model");
 const Company = require("../models/company_model");
+const ESGData = require("../models/esg_data_model");
+const GovernanceBoardData = require("../models/governance_board_model"); // Added
 const AppError = require("../utils/app_error");
-const mongoose = require("mongoose");
+
+// Version constants
+const API_VERSION = process.env.API_VERSION || "1.0.0";
+const CALCULATION_VERSION = process.env.CALCULATION_VERSION || "1.0.0";
+const GEE_ADAPTER_VERSION = process.env.GEE_ADAPTER_VERSION || "1.0.0";
 
 /**
  * Helper function to extract metric values by name with proper error handling
@@ -251,11 +256,6 @@ async function getGovernanceMetrics(companyId, years = []) {
   }
 }
 
-// Version constants
-const API_VERSION = process.env.API_VERSION || "1.0.0";
-const CALCULATION_VERSION = process.env.CALCULATION_VERSION || "1.0.0";
-const GEE_ADAPTER_VERSION = process.env.GEE_ADAPTER_VERSION || "1.0.0";
-
 /**
  * Governance & Board Metrics API - Enhanced with all requirements
  */
@@ -287,11 +287,16 @@ async function getGovernanceBoardData(companyId, year = null) {
       throw new AppError("Company not found", 404, "NOT_FOUND");
     }
 
-    // Governance-specific metrics
+    // Fetch the active GovernanceBoardData record (dedicated model)
+    const governanceBoardRecord = await GovernanceBoardData.findOne({
+      company: companyId,
+    }).lean();
+
+    // Governance-specific metrics (from ESGData)
     const governanceMetricNames = [
       "Board Size",
       "Board Attendance - Number of meetings held",
-      "Audit and Compliance Committee (Non-exe cutive Directors)",
+      "Audit and Compliance Committee (Non-executive Directors)",
       "Audit and Compliance Committee (Independent Non-executive Directors)",
       "Risk Management & Sustainability Committee (Executive Directors)",
       "Risk Management & Sustainability Committee (Non-executive Directors)",
@@ -311,14 +316,14 @@ async function getGovernanceBoardData(companyId, year = null) {
       "IFRS / Sustainability-Related Financial Disclosures",
     ];
 
-    // Get governance metrics
+    // Get governance metrics from ESGData
     const governanceMetrics = await getMetricsByNames(
       companyId,
       governanceMetricNames,
       targetYears,
     );
 
-    // Get ALL GOVERNANCE ESG metrics for the selected year
+    // Get ALL GOVERNANCE ESG metrics for the selected year from ESGData
     const allGovernanceMetrics = await getGovernanceMetrics(
       companyId,
       targetYears,
@@ -405,6 +410,9 @@ async function getGovernanceBoardData(companyId, year = null) {
         timestamp: new Date().toISOString(),
         requested_year: targetYear,
       },
+
+      // Include the full GovernanceBoardData record (dedicated model)
+      governance_board_data: governanceBoardRecord || null,
 
       // Year Information
       year_data: {

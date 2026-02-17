@@ -2116,6 +2116,2074 @@ const options = {
           },
         },
 
+        EnergyConsumptionData: {
+          type: "object",
+          properties: {
+            _id: {
+              type: "string",
+              example: "665b9c9fe4f1c23b04d67890",
+            },
+
+            company: {
+              type: "string",
+              description: "Company ID reference",
+              example: "665a8c7be4f1c23b04d12345",
+            },
+
+            // -----------------------
+            // Data Coverage Period
+            // -----------------------
+            data_period_start: {
+              type: "string",
+              nullable: true,
+              example: "2022",
+            },
+            data_period_end: {
+              type: "string",
+              nullable: true,
+              example: "2025",
+            },
+
+            // -----------------------
+            // Original Source Information
+            // -----------------------
+            original_source: {
+              type: "string",
+              nullable: true,
+              example: "HVE Integrated Report 2025",
+            },
+            source_files: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  name: {
+                    type: "string",
+                    example: "Sustainability_Report_2024.pdf",
+                  },
+                  year: {
+                    type: "string",
+                    example: "2024",
+                  },
+                  pages: {
+                    type: "string",
+                    example: "45-48",
+                  },
+                  type: {
+                    type: "string",
+                    enum: [
+                      "annual_report",
+                      "integrated_report",
+                      "sustainability_report",
+                      "other",
+                    ],
+                    example: "sustainability_report",
+                  },
+                },
+              },
+            },
+
+            // -----------------------
+            // Import Tracking
+            // -----------------------
+            import_source: {
+              type: "string",
+              enum: ["csv", "excel", "manual", "api", "pdf_extraction"],
+              default: "manual",
+              example: "excel",
+            },
+            source_file_name: {
+              type: "string",
+              nullable: true,
+              example: "Energy_Metrics_2022_2025.xlsx",
+            },
+            source_file_metadata: {
+              type: "object",
+              nullable: true,
+              example: {
+                size: "1.5MB",
+                sheets: ["Bagasse Usage", "Coal Consumption", "Electricity"],
+                last_modified: "2025-02-15",
+              },
+            },
+            import_batch_id: {
+              type: "string",
+              nullable: true,
+              example: "BATCH-ENERGY-2025-001",
+            },
+            import_date: {
+              type: "string",
+              format: "date-time",
+              example: "2025-02-10T08:00:00Z",
+            },
+            import_notes: {
+              type: "string",
+              nullable: true,
+              example: "Imported from audited annual energy report",
+            },
+
+            // -----------------------
+            // Data Quality & Verification
+            // -----------------------
+            data_quality_score: {
+              type: "number",
+              minimum: 0,
+              maximum: 100,
+              nullable: true,
+              example: 92,
+            },
+            verification_status: {
+              type: "string",
+              enum: [
+                "unverified",
+                "pending_review",
+                "verified",
+                "audited",
+                "disputed",
+              ],
+              default: "unverified",
+              example: "verified",
+            },
+            verified_by: {
+              type: "string",
+              nullable: true,
+              example: "665a9d2fe4f1c23b04d99999",
+            },
+            verified_at: {
+              type: "string",
+              format: "date-time",
+              nullable: true,
+              example: "2025-03-01T10:15:00Z",
+            },
+            verification_notes: {
+              type: "string",
+              nullable: true,
+              example: "Verified against source documents",
+            },
+
+            // -----------------------
+            // Validation
+            // -----------------------
+            validation_status: {
+              type: "string",
+              enum: [
+                "not_validated",
+                "validating",
+                "validated",
+                "failed_validation",
+              ],
+              default: "not_validated",
+              example: "validated",
+            },
+            validation_errors: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  metric_name: {
+                    type: "string",
+                    example: "coal_consumption",
+                  },
+                  year: {
+                    type: "string",
+                    example: "2023",
+                  },
+                  error_message: {
+                    type: "string",
+                    example: "Value exceeds expected range",
+                  },
+                  field: {
+                    type: "string",
+                    example: "numeric_value",
+                  },
+                  severity: {
+                    type: "string",
+                    enum: ["warning", "error", "critical"],
+                    example: "error",
+                  },
+                },
+              },
+            },
+            validation_notes: {
+              type: "string",
+              nullable: true,
+              example: "All metrics validated successfully",
+            },
+
+            // -----------------------
+            // Energy Metrics
+            // -----------------------
+            metrics: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  category: {
+                    type: "string",
+                    enum: [
+                      "bagasse_usage",
+                      "coal_consumption",
+                      "electricity_generated",
+                      "electricity_purchased",
+                      "electricity_exported",
+                      "solar_power_usage",
+                      "fuel_consumption",
+                      "solar_infrastructure",
+                      "year_over_year_change",
+                      "forecast",
+                      "risk",
+                    ],
+                    example: "bagasse_usage",
+                  },
+                  subcategory: {
+                    type: "string",
+                    nullable: true,
+                    example: "inside_company_diesel",
+                  },
+                  metric_name: {
+                    type: "string",
+                    example: "Bagasse Consumption",
+                  },
+                  description: {
+                    type: "string",
+                    nullable: true,
+                    example: "Total bagasse used for cogeneration",
+                  },
+                  data_type: {
+                    type: "string",
+                    enum: ["yearly_series", "single_value", "list", "summary"],
+                    default: "yearly_series",
+                    example: "yearly_series",
+                  },
+                  yearly_data: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        year: {
+                          type: "string",
+                          example: "2023→2024",
+                        },
+                        fiscal_year: {
+                          type: "number",
+                          nullable: true,
+                          example: 2023,
+                        },
+                        value: {
+                          type: "string",
+                          example: "1,245,000",
+                        },
+                        numeric_value: {
+                          type: "number",
+                          nullable: true,
+                          example: 1245000,
+                        },
+                        unit: {
+                          type: "string",
+                          example: "tons",
+                        },
+                        source: {
+                          type: "string",
+                          example: "Annual Report 2024",
+                        },
+                        notes: {
+                          type: "string",
+                          nullable: true,
+                          example: "Includes all processing units",
+                        },
+                        added_by: {
+                          type: "string",
+                          example: "665a9d2fe4f1c23b04d11111",
+                        },
+                        added_at: {
+                          type: "string",
+                          format: "date-time",
+                          example: "2025-02-01T09:00:00Z",
+                        },
+                        last_updated_by: {
+                          type: "string",
+                          nullable: true,
+                          example: "665a9d2fe4f1c23b04d22222",
+                        },
+                        last_updated_at: {
+                          type: "string",
+                          format: "date-time",
+                          example: "2025-02-05T14:30:00Z",
+                        },
+                      },
+                      required: ["year", "source", "added_by"],
+                    },
+                  },
+                  single_value: {
+                    type: "object",
+                    properties: {
+                      value: {
+                        type: "string",
+                        example: "250",
+                      },
+                      numeric_value: {
+                        type: "number",
+                        nullable: true,
+                        example: 250,
+                      },
+                      unit: {
+                        type: "string",
+                        example: "units",
+                      },
+                      source: {
+                        type: "string",
+                        example: "Site survey 2025",
+                      },
+                      notes: {
+                        type: "string",
+                        nullable: true,
+                        example: "Total solar geysers installed",
+                      },
+                      as_of_date: {
+                        type: "string",
+                        format: "date-time",
+                        example: "2025-01-15T00:00:00Z",
+                      },
+                      added_by: {
+                        type: "string",
+                        example: "665a9d2fe4f1c23b04d33333",
+                      },
+                    },
+                  },
+                  list_data: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        item: {
+                          type: "string",
+                          example: "Solar Panel Array - Building A",
+                        },
+                        count: {
+                          type: "number",
+                          example: 150,
+                        },
+                        details: {
+                          type: "string",
+                          example: "300W monocrystalline panels",
+                        },
+                        source: {
+                          type: "string",
+                          example: "Maintenance log",
+                        },
+                        added_at: {
+                          type: "string",
+                          format: "date-time",
+                          example: "2025-02-10T11:00:00Z",
+                        },
+                      },
+                    },
+                  },
+                  summary_value: {
+                    type: "object",
+                    properties: {
+                      key_metric: {
+                        type: "string",
+                        example: "Total Renewable Energy",
+                      },
+                      latest_value: {
+                        type: "string",
+                        example: "3,450 MWh",
+                      },
+                      trend: {
+                        type: "string",
+                        example: "+12.5% vs previous year",
+                      },
+                      notes: {
+                        type: "string",
+                        nullable: true,
+                        example: "Includes solar and bagasse",
+                      },
+                      as_of_date: {
+                        type: "string",
+                        format: "date-time",
+                        example: "2025-02-28T00:00:00Z",
+                      },
+                    },
+                  },
+                  is_active: {
+                    type: "boolean",
+                    default: true,
+                    example: true,
+                  },
+                  created_at: {
+                    type: "string",
+                    format: "date-time",
+                    example: "2025-02-01T08:00:00Z",
+                  },
+                  created_by: {
+                    type: "string",
+                    example: "665a9d2fe4f1c23b04d44444",
+                  },
+                  updated_at: {
+                    type: "string",
+                    format: "date-time",
+                    nullable: true,
+                    example: "2025-02-12T14:30:00Z",
+                  },
+                  last_updated_by: {
+                    type: "string",
+                    nullable: true,
+                    example: "665a9d2fe4f1c23b04d55555",
+                  },
+                },
+                required: ["category", "metric_name", "created_by"],
+              },
+            },
+
+            // -----------------------
+            // Summary Statistics
+            // -----------------------
+            summary_stats: {
+              type: "object",
+              properties: {
+                total_bagasse_usage: {
+                  type: "number",
+                  default: 0,
+                  example: 2500000,
+                },
+                total_coal_consumption: {
+                  type: "number",
+                  default: 0,
+                  example: 500000,
+                },
+                total_electricity_generated: {
+                  type: "number",
+                  default: 0,
+                  example: 850000,
+                },
+                total_electricity_purchased: {
+                  type: "number",
+                  default: 0,
+                  example: 150000,
+                },
+                total_electricity_exported: {
+                  type: "number",
+                  default: 0,
+                  example: 75000,
+                },
+                total_solar_power_usage: {
+                  type: "number",
+                  default: 0,
+                  example: 45000,
+                },
+                total_fuel_consumption_inside: {
+                  type: "number",
+                  default: 0,
+                  example: 120000,
+                },
+                total_fuel_consumption_outside: {
+                  type: "number",
+                  default: 0,
+                  example: 30000,
+                },
+                average_solar_generation: {
+                  type: "number",
+                  default: 0,
+                  example: 3750,
+                },
+                last_updated: {
+                  type: "string",
+                  format: "date-time",
+                  example: "2025-02-28T15:00:00Z",
+                },
+              },
+            },
+
+            // -----------------------
+            // GRI References
+            // -----------------------
+            gri_references: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  standard: {
+                    type: "string",
+                    example: "GRI 302: Energy 2016",
+                  },
+                  metric_name: {
+                    type: "string",
+                    example: "Energy consumption within the organization",
+                  },
+                  compliance_status: {
+                    type: "string",
+                    enum: [
+                      "compliant",
+                      "partially_compliant",
+                      "non_compliant",
+                      "not_applicable",
+                    ],
+                    example: "compliant",
+                  },
+                  reporting_year: {
+                    type: "string",
+                    example: "2024",
+                  },
+                },
+              },
+            },
+
+            // -----------------------
+            // Forecast & Risk
+            // -----------------------
+            forecast_data: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  forecast_year: {
+                    type: "string",
+                    example: "2026",
+                  },
+                  metric_name: {
+                    type: "string",
+                    example: "total_electricity_generated",
+                  },
+                  predicted_value: {
+                    type: "number",
+                    example: 950000,
+                  },
+                  confidence_interval: {
+                    type: "string",
+                    example: "±5%",
+                  },
+                  methodology: {
+                    type: "string",
+                    example: "Linear regression based on historical data",
+                  },
+                  created_at: {
+                    type: "string",
+                    format: "date-time",
+                    example: "2025-02-15T10:00:00Z",
+                  },
+                  created_by: {
+                    type: "string",
+                    example: "665a9d2fe4f1c23b04d66666",
+                  },
+                },
+              },
+            },
+            risk_assessment: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  risk_category: {
+                    type: "string",
+                    example: "Regulatory Compliance",
+                  },
+                  description: {
+                    type: "string",
+                    example: "Potential carbon tax implementation",
+                  },
+                  likelihood: {
+                    type: "string",
+                    example: "Medium",
+                  },
+                  impact: {
+                    type: "string",
+                    example: "High",
+                  },
+                  mitigation: {
+                    type: "string",
+                    example: "Increase renewable energy investment",
+                  },
+                  as_of_date: {
+                    type: "string",
+                    format: "date-time",
+                    example: "2025-02-01T00:00:00Z",
+                  },
+                },
+              },
+            },
+
+            // -----------------------
+            // Audit & Soft Delete
+            // -----------------------
+            created_at: {
+              type: "string",
+              format: "date-time",
+              example: "2025-02-01T08:00:00Z",
+            },
+            created_by: {
+              type: "string",
+              example: "665a9d2fe4f1c23b04d77777",
+            },
+            last_updated_at: {
+              type: "string",
+              format: "date-time",
+              example: "2025-02-28T14:30:00Z",
+            },
+            last_updated_by: {
+              type: "string",
+              nullable: true,
+              example: "665a9d2fe4f1c23b04d88888",
+            },
+
+            // -----------------------
+            // Versioning
+            // -----------------------
+            version: {
+              type: "number",
+              default: 1,
+              example: 2,
+            },
+            previous_version: {
+              type: "string",
+              nullable: true,
+              example: "665b9c9fe4f1c23b04d66666",
+            },
+            restored_from: {
+              type: "string",
+              nullable: true,
+              example: "665b9c9fe4f1c23b04d55555",
+            },
+            restore_notes: {
+              type: "string",
+              nullable: true,
+              example: "Restored from version 1 after data correction",
+            },
+
+            // -----------------------
+            // Soft Delete
+            // -----------------------
+            is_active: {
+              type: "boolean",
+              default: true,
+              example: true,
+            },
+            deleted_at: {
+              type: "string",
+              format: "date-time",
+              nullable: true,
+            },
+            deleted_by: {
+              type: "string",
+              nullable: true,
+            },
+          },
+
+          required: ["company", "created_by"],
+        },
+
+        EnergyConsumptionDataResponse: {
+          type: "object",
+          properties: {
+            success: {
+              type: "boolean",
+              example: true,
+            },
+            message: {
+              type: "string",
+              example: "Energy consumption data created successfully",
+            },
+            data: {
+              $ref: "#/components/schemas/EnergyConsumptionData",
+            },
+          },
+        },
+
+        EnergyConsumptionDataListResponse: {
+          type: "object",
+          properties: {
+            success: {
+              type: "boolean",
+              example: true,
+            },
+            message: {
+              type: "string",
+              example: "Energy consumption data retrieved successfully",
+            },
+            data: {
+              type: "array",
+              items: {
+                $ref: "#/components/schemas/EnergyConsumptionData",
+              },
+            },
+            pagination: {
+              type: "object",
+              properties: {
+                total: {
+                  type: "integer",
+                  example: 100,
+                },
+                page: {
+                  type: "integer",
+                  example: 1,
+                },
+                limit: {
+                  type: "integer",
+                  example: 10,
+                },
+                pages: {
+                  type: "integer",
+                  example: 10,
+                },
+              },
+            },
+          },
+        },
+
+        EnergyConsumptionDataUpdateResponse: {
+          type: "object",
+          properties: {
+            success: {
+              type: "boolean",
+              example: true,
+            },
+            message: {
+              type: "string",
+              example: "Energy consumption data updated successfully",
+            },
+            data: {
+              $ref: "#/components/schemas/EnergyConsumptionData",
+            },
+          },
+        },
+
+        EnergyConsumptionDataDeleteResponse: {
+          type: "object",
+          properties: {
+            success: {
+              type: "boolean",
+              example: true,
+            },
+            message: {
+              type: "string",
+              example: "Energy consumption data deleted successfully",
+            },
+            data: {
+              type: "object",
+              nullable: true,
+              example: null,
+            },
+          },
+        },
+
+        EnergyConsumptionDataBulkResponse: {
+          type: "object",
+          properties: {
+            success: {
+              type: "boolean",
+              example: true,
+            },
+            message: {
+              type: "string",
+              example: "Bulk operation completed successfully",
+            },
+            data: {
+              type: "object",
+              properties: {
+                created: {
+                  type: "array",
+                  items: {
+                    $ref: "#/components/schemas/EnergyConsumptionData",
+                  },
+                },
+                updated: {
+                  type: "array",
+                  items: {
+                    $ref: "#/components/schemas/EnergyConsumptionData",
+                  },
+                },
+                failed: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      index: {
+                        type: "integer",
+                        example: 3,
+                      },
+                      error: {
+                        type: "string",
+                        example: "Invalid data format",
+                      },
+                    },
+                  },
+                },
+                summary: {
+                  type: "object",
+                  properties: {
+                    total_processed: {
+                      type: "integer",
+                      example: 50,
+                    },
+                    success_count: {
+                      type: "integer",
+                      example: 48,
+                    },
+                    failure_count: {
+                      type: "integer",
+                      example: 2,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+
+        EnergyConsumptionDataValidationResponse: {
+          type: "object",
+          properties: {
+            success: {
+              type: "boolean",
+              example: true,
+            },
+            message: {
+              type: "string",
+              example: "Data validation completed",
+            },
+            data: {
+              type: "object",
+              properties: {
+                validation_status: {
+                  type: "string",
+                  enum: [
+                    "not_validated",
+                    "validating",
+                    "validated",
+                    "failed_validation",
+                  ],
+                  example: "validated",
+                },
+                validation_errors: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      metric_name: {
+                        type: "string",
+                        example: "coal_consumption",
+                      },
+                      year: {
+                        type: "string",
+                        example: "2023",
+                      },
+                      error_message: {
+                        type: "string",
+                        example: "Value exceeds expected range",
+                      },
+                      field: {
+                        type: "string",
+                        example: "numeric_value",
+                      },
+                      severity: {
+                        type: "string",
+                        enum: ["warning", "error", "critical"],
+                        example: "error",
+                      },
+                    },
+                  },
+                },
+                validation_notes: {
+                  type: "string",
+                  example: "3 warnings found, no critical errors",
+                },
+                data_quality_score: {
+                  type: "number",
+                  example: 85,
+                },
+              },
+            },
+          },
+        },
+
+        EnergyConsumptionDataVerifyResponse: {
+          type: "object",
+          properties: {
+            success: {
+              type: "boolean",
+              example: true,
+            },
+            message: {
+              type: "string",
+              example: "Data verification completed",
+            },
+            data: {
+              type: "object",
+              properties: {
+                verification_status: {
+                  type: "string",
+                  enum: [
+                    "unverified",
+                    "pending_review",
+                    "verified",
+                    "audited",
+                    "disputed",
+                  ],
+                  example: "verified",
+                },
+                verified_by: {
+                  type: "string",
+                  example: "665a9d2fe4f1c23b04d99999",
+                },
+                verified_at: {
+                  type: "string",
+                  format: "date-time",
+                  example: "2025-03-01T10:15:00Z",
+                },
+                verification_notes: {
+                  type: "string",
+                  example: "Data verified against source documents",
+                },
+              },
+            },
+          },
+        },
+
+        EnergyConsumptionDataSummaryResponse: {
+          type: "object",
+          properties: {
+            success: {
+              type: "boolean",
+              example: true,
+            },
+            message: {
+              type: "string",
+              example: "Summary statistics retrieved successfully",
+            },
+            data: {
+              type: "object",
+              properties: {
+                company: {
+                  type: "string",
+                  example: "665a8c7be4f1c23b04d12345",
+                },
+                reporting_period: {
+                  type: "object",
+                  properties: {
+                    start: {
+                      type: "string",
+                      example: "2022",
+                    },
+                    end: {
+                      type: "string",
+                      example: "2025",
+                    },
+                  },
+                },
+                summary_stats: {
+                  type: "object",
+                  properties: {
+                    total_bagasse_usage: {
+                      type: "number",
+                      example: 2500000,
+                    },
+                    total_coal_consumption: {
+                      type: "number",
+                      example: 500000,
+                    },
+                    total_electricity_generated: {
+                      type: "number",
+                      example: 850000,
+                    },
+                    total_electricity_purchased: {
+                      type: "number",
+                      example: 150000,
+                    },
+                    total_electricity_exported: {
+                      type: "number",
+                      example: 75000,
+                    },
+                    total_solar_power_usage: {
+                      type: "number",
+                      example: 45000,
+                    },
+                    total_fuel_consumption_inside: {
+                      type: "number",
+                      example: 120000,
+                    },
+                    total_fuel_consumption_outside: {
+                      type: "number",
+                      example: 30000,
+                    },
+                    average_solar_generation: {
+                      type: "number",
+                      example: 3750,
+                    },
+                  },
+                },
+                metrics_count: {
+                  type: "integer",
+                  example: 15,
+                },
+                data_quality_score: {
+                  type: "number",
+                  example: 92,
+                },
+                verification_status: {
+                  type: "string",
+                  example: "verified",
+                },
+                last_updated: {
+                  type: "string",
+                  format: "date-time",
+                  example: "2025-02-28T14:30:00Z",
+                },
+              },
+            },
+          },
+        },
+
+        EnergyConsumptionDataErrorResponse: {
+          type: "object",
+          properties: {
+            success: {
+              type: "boolean",
+              example: false,
+            },
+            message: {
+              type: "string",
+              example: "Failed to process energy consumption data",
+            },
+            error: {
+              type: "object",
+              properties: {
+                code: {
+                  type: "string",
+                  example: "VALIDATION_ERROR",
+                },
+                details: {
+                  type: "string",
+                  example: "Required field 'metric_name' is missing",
+                },
+                field_errors: {
+                  type: "object",
+                  example: {
+                    "metrics[0].yearly_data[0].value": "Value is required",
+                    "metrics[0].category": "Invalid category value",
+                  },
+                },
+              },
+            },
+          },
+        },
+
+        EnergyConsumptionDataImportResponse: {
+          type: "object",
+          properties: {
+            success: {
+              type: "boolean",
+              example: true,
+            },
+            message: {
+              type: "string",
+              example: "Data imported successfully",
+            },
+            data: {
+              type: "object",
+              properties: {
+                import_batch_id: {
+                  type: "string",
+                  example: "BATCH-ENERGY-2025-001",
+                },
+                import_source: {
+                  type: "string",
+                  enum: ["csv", "excel", "manual", "api", "pdf_extraction"],
+                  example: "excel",
+                },
+                source_file_name: {
+                  type: "string",
+                  example: "Energy_Metrics_2022_2025.xlsx",
+                },
+                records_imported: {
+                  type: "integer",
+                  example: 250,
+                },
+                metrics_created: {
+                  type: "integer",
+                  example: 15,
+                },
+                yearly_data_points: {
+                  type: "integer",
+                  example: 75,
+                },
+                validation_summary: {
+                  type: "object",
+                  properties: {
+                    passed: {
+                      type: "integer",
+                      example: 245,
+                    },
+                    warnings: {
+                      type: "integer",
+                      example: 5,
+                    },
+                    errors: {
+                      type: "integer",
+                      example: 0,
+                    },
+                  },
+                },
+                import_date: {
+                  type: "string",
+                  format: "date-time",
+                  example: "2025-02-10T08:00:00Z",
+                },
+              },
+            },
+          },
+        },
+
+        WorkforceDiversityDataResponse: {
+          type: "object",
+          properties: {
+            success: {
+              type: "boolean",
+              example: true,
+            },
+            message: {
+              type: "string",
+              example: "Workforce diversity data created successfully",
+            },
+            data: {
+              $ref: "#/components/schemas/WorkforceDiversityData",
+            },
+          },
+        },
+
+        WorkforceDiversityDataListResponse: {
+          type: "object",
+          properties: {
+            success: {
+              type: "boolean",
+              example: true,
+            },
+            message: {
+              type: "string",
+              example: "Workforce diversity data retrieved successfully",
+            },
+            data: {
+              type: "array",
+              items: {
+                $ref: "#/components/schemas/WorkforceDiversityData",
+              },
+            },
+            pagination: {
+              type: "object",
+              properties: {
+                total: {
+                  type: "integer",
+                  example: 100,
+                },
+                page: {
+                  type: "integer",
+                  example: 1,
+                },
+                limit: {
+                  type: "integer",
+                  example: 10,
+                },
+                pages: {
+                  type: "integer",
+                  example: 10,
+                },
+              },
+            },
+          },
+        },
+
+        WorkforceDiversityDataUpdateResponse: {
+          type: "object",
+          properties: {
+            success: {
+              type: "boolean",
+              example: true,
+            },
+            message: {
+              type: "string",
+              example: "Workforce diversity data updated successfully",
+            },
+            data: {
+              $ref: "#/components/schemas/WorkforceDiversityData",
+            },
+          },
+        },
+
+        WorkforceDiversityDataDeleteResponse: {
+          type: "object",
+          properties: {
+            success: {
+              type: "boolean",
+              example: true,
+            },
+            message: {
+              type: "string",
+              example: "Workforce diversity data deleted successfully",
+            },
+            data: {
+              type: "object",
+              nullable: true,
+              example: null,
+            },
+          },
+        },
+
+        WorkforceDiversityDataBulkResponse: {
+          type: "object",
+          properties: {
+            success: {
+              type: "boolean",
+              example: true,
+            },
+            message: {
+              type: "string",
+              example: "Bulk operation completed successfully",
+            },
+            data: {
+              type: "object",
+              properties: {
+                created: {
+                  type: "array",
+                  items: {
+                    $ref: "#/components/schemas/WorkforceDiversityData",
+                  },
+                },
+                updated: {
+                  type: "array",
+                  items: {
+                    $ref: "#/components/schemas/WorkforceDiversityData",
+                  },
+                },
+                failed: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      index: {
+                        type: "integer",
+                        example: 3,
+                      },
+                      error: {
+                        type: "string",
+                        example: "Invalid data format",
+                      },
+                    },
+                  },
+                },
+                summary: {
+                  type: "object",
+                  properties: {
+                    total_processed: {
+                      type: "integer",
+                      example: 50,
+                    },
+                    success_count: {
+                      type: "integer",
+                      example: 48,
+                    },
+                    failure_count: {
+                      type: "integer",
+                      example: 2,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+
+        WorkforceDiversityDataValidationResponse: {
+          type: "object",
+          properties: {
+            success: {
+              type: "boolean",
+              example: true,
+            },
+            message: {
+              type: "string",
+              example: "Data validation completed",
+            },
+            data: {
+              type: "object",
+              properties: {
+                validation_status: {
+                  type: "string",
+                  enum: [
+                    "not_validated",
+                    "validating",
+                    "validated",
+                    "failed_validation",
+                  ],
+                  example: "validated",
+                },
+                validation_errors: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      metric_name: {
+                        type: "string",
+                        example: "female_employees",
+                      },
+                      year: {
+                        type: "string",
+                        example: "2023",
+                      },
+                      error_message: {
+                        type: "string",
+                        example: "Value exceeds total employees",
+                      },
+                      field: {
+                        type: "string",
+                        example: "numeric_value",
+                      },
+                      severity: {
+                        type: "string",
+                        enum: ["warning", "error", "critical"],
+                        example: "error",
+                      },
+                    },
+                  },
+                },
+                validation_notes: {
+                  type: "string",
+                  example: "2 warnings found, no critical errors",
+                },
+                data_quality_score: {
+                  type: "number",
+                  example: 88,
+                },
+              },
+            },
+          },
+        },
+
+        WorkforceDiversityDataVerifyResponse: {
+          type: "object",
+          properties: {
+            success: {
+              type: "boolean",
+              example: true,
+            },
+            message: {
+              type: "string",
+              example: "Data verification completed",
+            },
+            data: {
+              type: "object",
+              properties: {
+                verification_status: {
+                  type: "string",
+                  enum: [
+                    "unverified",
+                    "pending_review",
+                    "verified",
+                    "audited",
+                    "disputed",
+                  ],
+                  example: "verified",
+                },
+                verified_by: {
+                  type: "string",
+                  example: "665a9d2fe4f1c23b04d99999",
+                },
+                verified_at: {
+                  type: "string",
+                  format: "date-time",
+                  example: "2025-03-01T10:15:00Z",
+                },
+                verification_notes: {
+                  type: "string",
+                  example: "Data verified against HR records",
+                },
+              },
+            },
+          },
+        },
+
+        WorkforceDiversityDataSummaryResponse: {
+          type: "object",
+          properties: {
+            success: {
+              type: "boolean",
+              example: true,
+            },
+            message: {
+              type: "string",
+              example: "Summary statistics retrieved successfully",
+            },
+            data: {
+              type: "object",
+              properties: {
+                company: {
+                  type: "string",
+                  example: "665a8c7be4f1c23b04d12345",
+                },
+                reporting_period: {
+                  type: "object",
+                  properties: {
+                    start: {
+                      type: "string",
+                      example: "2022",
+                    },
+                    end: {
+                      type: "string",
+                      example: "2025",
+                    },
+                  },
+                },
+                summary_stats: {
+                  type: "object",
+                  properties: {
+                    total_female_employees: {
+                      type: "number",
+                      example: 1250,
+                    },
+                    total_male_employees: {
+                      type: "number",
+                      example: 1750,
+                    },
+                    total_female_recruits: {
+                      type: "number",
+                      example: 150,
+                    },
+                    total_male_recruits: {
+                      type: "number",
+                      example: 175,
+                    },
+                    average_female_representation: {
+                      type: "number",
+                      example: 41.7,
+                    },
+                    average_turnover_rate: {
+                      type: "number",
+                      example: 12.5,
+                    },
+                  },
+                },
+                metrics_count: {
+                  type: "integer",
+                  example: 18,
+                },
+                diversity_breakdown: {
+                  type: "object",
+                  example: {
+                    female_leadership: "35%",
+                    male_leadership: "65%",
+                    under_30: "22%",
+                    "30_to_50": "58%",
+                    over_50: "20%",
+                  },
+                },
+                data_quality_score: {
+                  type: "number",
+                  example: 94,
+                },
+                verification_status: {
+                  type: "string",
+                  example: "verified",
+                },
+                last_updated: {
+                  type: "string",
+                  format: "date-time",
+                  example: "2025-02-28T14:30:00Z",
+                },
+              },
+            },
+          },
+        },
+
+        WorkforceDiversityDataErrorResponse: {
+          type: "object",
+          properties: {
+            success: {
+              type: "boolean",
+              example: false,
+            },
+            message: {
+              type: "string",
+              example: "Failed to process workforce diversity data",
+            },
+            error: {
+              type: "object",
+              properties: {
+                code: {
+                  type: "string",
+                  example: "VALIDATION_ERROR",
+                },
+                details: {
+                  type: "string",
+                  example: "Required field 'metric_name' is missing",
+                },
+                field_errors: {
+                  type: "object",
+                  example: {
+                    "metrics[0].yearly_data[0].value": "Value is required",
+                    "metrics[0].category": "Invalid category value",
+                  },
+                },
+              },
+            },
+          },
+        },
+
+        WorkforceDiversityDataImportResponse: {
+          type: "object",
+          properties: {
+            success: {
+              type: "boolean",
+              example: true,
+            },
+            message: {
+              type: "string",
+              example: "Data imported successfully",
+            },
+            data: {
+              type: "object",
+              properties: {
+                import_batch_id: {
+                  type: "string",
+                  example: "BATCH-WORKFORCE-2025-001",
+                },
+                import_source: {
+                  type: "string",
+                  enum: ["csv", "excel", "manual", "api", "pdf_extraction"],
+                  example: "excel",
+                },
+                source_file_name: {
+                  type: "string",
+                  example: "Workforce_Metrics_2022_2025.xlsx",
+                },
+                records_imported: {
+                  type: "integer",
+                  example: 180,
+                },
+                metrics_created: {
+                  type: "integer",
+                  example: 12,
+                },
+                yearly_data_points: {
+                  type: "integer",
+                  example: 48,
+                },
+                demographic_breakdown: {
+                  type: "object",
+                  example: {
+                    gender_data_points: 24,
+                    age_data_points: 18,
+                    diversity_initiatives: 6,
+                  },
+                },
+                validation_summary: {
+                  type: "object",
+                  properties: {
+                    passed: {
+                      type: "integer",
+                      example: 175,
+                    },
+                    warnings: {
+                      type: "integer",
+                      example: 5,
+                    },
+                    errors: {
+                      type: "integer",
+                      example: 0,
+                    },
+                  },
+                },
+                import_date: {
+                  type: "string",
+                  format: "date-time",
+                  example: "2025-02-10T08:00:00Z",
+                },
+              },
+            },
+          },
+        },
+
+        HealthSafetyDataResponse: {
+          type: "object",
+          properties: {
+            success: {
+              type: "boolean",
+              example: true,
+            },
+            message: {
+              type: "string",
+              example: "Health & safety data created successfully",
+            },
+            data: {
+              $ref: "#/components/schemas/HealthSafetyData",
+            },
+          },
+        },
+
+        HealthSafetyDataListResponse: {
+          type: "object",
+          properties: {
+            success: {
+              type: "boolean",
+              example: true,
+            },
+            message: {
+              type: "string",
+              example: "Health & safety data retrieved successfully",
+            },
+            data: {
+              type: "array",
+              items: {
+                $ref: "#/components/schemas/HealthSafetyData",
+              },
+            },
+            pagination: {
+              type: "object",
+              properties: {
+                total: {
+                  type: "integer",
+                  example: 75,
+                },
+                page: {
+                  type: "integer",
+                  example: 1,
+                },
+                limit: {
+                  type: "integer",
+                  example: 10,
+                },
+                pages: {
+                  type: "integer",
+                  example: 8,
+                },
+              },
+            },
+          },
+        },
+
+        HealthSafetyDataUpdateResponse: {
+          type: "object",
+          properties: {
+            success: {
+              type: "boolean",
+              example: true,
+            },
+            message: {
+              type: "string",
+              example: "Health & safety data updated successfully",
+            },
+            data: {
+              $ref: "#/components/schemas/HealthSafetyData",
+            },
+          },
+        },
+
+        HealthSafetyDataDeleteResponse: {
+          type: "object",
+          properties: {
+            success: {
+              type: "boolean",
+              example: true,
+            },
+            message: {
+              type: "string",
+              example: "Health & safety data deleted successfully",
+            },
+            data: {
+              type: "object",
+              nullable: true,
+              example: null,
+            },
+          },
+        },
+
+        HealthSafetyDataBulkResponse: {
+          type: "object",
+          properties: {
+            success: {
+              type: "boolean",
+              example: true,
+            },
+            message: {
+              type: "string",
+              example: "Bulk operation completed successfully",
+            },
+            data: {
+              type: "object",
+              properties: {
+                created: {
+                  type: "array",
+                  items: {
+                    $ref: "#/components/schemas/HealthSafetyData",
+                  },
+                },
+                updated: {
+                  type: "array",
+                  items: {
+                    $ref: "#/components/schemas/HealthSafetyData",
+                  },
+                },
+                failed: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      index: {
+                        type: "integer",
+                        example: 3,
+                      },
+                      error: {
+                        type: "string",
+                        example: "Invalid data format",
+                      },
+                    },
+                  },
+                },
+                summary: {
+                  type: "object",
+                  properties: {
+                    total_processed: {
+                      type: "integer",
+                      example: 40,
+                    },
+                    success_count: {
+                      type: "integer",
+                      example: 38,
+                    },
+                    failure_count: {
+                      type: "integer",
+                      example: 2,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+
+        HealthSafetyDataValidationResponse: {
+          type: "object",
+          properties: {
+            success: {
+              type: "boolean",
+              example: true,
+            },
+            message: {
+              type: "string",
+              example: "Data validation completed",
+            },
+            data: {
+              type: "object",
+              properties: {
+                validation_status: {
+                  type: "string",
+                  enum: [
+                    "not_validated",
+                    "validating",
+                    "validated",
+                    "failed_validation",
+                  ],
+                  example: "validated",
+                },
+                validation_errors: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      metric_name: {
+                        type: "string",
+                        example: "malaria_cases",
+                      },
+                      year: {
+                        type: "string",
+                        example: "2023",
+                      },
+                      error_message: {
+                        type: "string",
+                        example: "Value missing for Q4",
+                      },
+                      field: {
+                        type: "string",
+                        example: "yearly_data",
+                      },
+                      severity: {
+                        type: "string",
+                        enum: ["warning", "error", "critical"],
+                        example: "warning",
+                      },
+                    },
+                  },
+                },
+                validation_notes: {
+                  type: "string",
+                  example: "1 warning found, no critical errors",
+                },
+                data_quality_score: {
+                  type: "number",
+                  example: 95,
+                },
+              },
+            },
+          },
+        },
+
+        HealthSafetyDataVerifyResponse: {
+          type: "object",
+          properties: {
+            success: {
+              type: "boolean",
+              example: true,
+            },
+            message: {
+              type: "string",
+              example: "Data verification completed",
+            },
+            data: {
+              type: "object",
+              properties: {
+                verification_status: {
+                  type: "string",
+                  enum: [
+                    "unverified",
+                    "pending_review",
+                    "verified",
+                    "audited",
+                    "disputed",
+                  ],
+                  example: "verified",
+                },
+                verified_by: {
+                  type: "string",
+                  example: "665a9d2fe4f1c23b04d99999",
+                },
+                verified_at: {
+                  type: "string",
+                  format: "date-time",
+                  example: "2025-03-01T10:15:00Z",
+                },
+                verification_notes: {
+                  type: "string",
+                  example: "Data verified against occupational health records",
+                },
+              },
+            },
+          },
+        },
+
+        HealthSafetyDataSummaryResponse: {
+          type: "object",
+          properties: {
+            success: {
+              type: "boolean",
+              example: true,
+            },
+            message: {
+              type: "string",
+              example: "Summary statistics retrieved successfully",
+            },
+            data: {
+              type: "object",
+              properties: {
+                company: {
+                  type: "string",
+                  example: "665a8c7be4f1c23b04d12345",
+                },
+                reporting_period: {
+                  type: "object",
+                  properties: {
+                    start: {
+                      type: "string",
+                      example: "2022",
+                    },
+                    end: {
+                      type: "string",
+                      example: "2025",
+                    },
+                  },
+                },
+                summary_stats: {
+                  type: "object",
+                  properties: {
+                    total_lti: {
+                      type: "number",
+                      example: 12,
+                    },
+                    total_fatalities: {
+                      type: "number",
+                      example: 0,
+                    },
+                    malaria_cases_2025: {
+                      type: "number",
+                      example: 23,
+                    },
+                    hiv_prevalence_2025: {
+                      type: "number",
+                      example: 2.5,
+                    },
+                    new_hiv_cases_2025: {
+                      type: "number",
+                      example: 3,
+                    },
+                    vct_uptake_2025: {
+                      type: "number",
+                      example: 450,
+                    },
+                    hospital_beds: {
+                      type: "number",
+                      example: 25,
+                    },
+                    total_health_professionals: {
+                      type: "number",
+                      example: 35,
+                    },
+                    doctors: {
+                      type: "number",
+                      example: 8,
+                    },
+                    medical_support_staff: {
+                      type: "number",
+                      example: 27,
+                    },
+                  },
+                },
+                metrics_count: {
+                  type: "integer",
+                  example: 22,
+                },
+                health_indicators: {
+                  type: "object",
+                  example: {
+                    lti_frequency_rate: "0.85",
+                    severity_rate: "22.5",
+                    occupational_disease_cases: 5,
+                    medical_evacuations: 3,
+                  },
+                },
+                data_quality_score: {
+                  type: "number",
+                  example: 96,
+                },
+                verification_status: {
+                  type: "string",
+                  example: "verified",
+                },
+                last_updated: {
+                  type: "string",
+                  format: "date-time",
+                  example: "2025-02-28T14:30:00Z",
+                },
+              },
+            },
+          },
+        },
+
+        HealthSafetyDataErrorResponse: {
+          type: "object",
+          properties: {
+            success: {
+              type: "boolean",
+              example: false,
+            },
+            message: {
+              type: "string",
+              example: "Failed to process health & safety data",
+            },
+            error: {
+              type: "object",
+              properties: {
+                code: {
+                  type: "string",
+                  example: "VALIDATION_ERROR",
+                },
+                details: {
+                  type: "string",
+                  example: "Required field 'metric_name' is missing",
+                },
+                field_errors: {
+                  type: "object",
+                  example: {
+                    "metrics[0].category": "Invalid category value",
+                    "metrics[0].yearly_data[0].numeric_value":
+                      "Must be a positive number",
+                  },
+                },
+              },
+            },
+          },
+        },
+
+        HealthSafetyDataImportResponse: {
+          type: "object",
+          properties: {
+            success: {
+              type: "boolean",
+              example: true,
+            },
+            message: {
+              type: "string",
+              example: "Data imported successfully",
+            },
+            data: {
+              type: "object",
+              properties: {
+                import_batch_id: {
+                  type: "string",
+                  example: "BATCH-HEALTHSAFETY-2025-001",
+                },
+                import_source: {
+                  type: "string",
+                  enum: ["csv", "excel", "manual", "api", "pdf_extraction"],
+                  example: "excel",
+                },
+                source_file_name: {
+                  type: "string",
+                  example: "Health_Safety_Metrics_2022_2025.xlsx",
+                },
+                records_imported: {
+                  type: "integer",
+                  example: 165,
+                },
+                metrics_created: {
+                  type: "integer",
+                  example: 14,
+                },
+                yearly_data_points: {
+                  type: "integer",
+                  example: 56,
+                },
+                health_metrics_breakdown: {
+                  type: "object",
+                  example: {
+                    lti_metrics: 32,
+                    health_services: 18,
+                    certifications: 3,
+                    training_hours: 12,
+                  },
+                },
+                validation_summary: {
+                  type: "object",
+                  properties: {
+                    passed: {
+                      type: "integer",
+                      example: 162,
+                    },
+                    warnings: {
+                      type: "integer",
+                      example: 3,
+                    },
+                    errors: {
+                      type: "integer",
+                      example: 0,
+                    },
+                  },
+                },
+                import_date: {
+                  type: "string",
+                  format: "date-time",
+                  example: "2025-02-10T08:00:00Z",
+                },
+              },
+            },
+          },
+        },
+
         CarbonEmissionResponse: {
           type: "object",
           properties: {
@@ -2983,6 +5051,13 @@ const options = {
     "./routers/crop_yield_router.js", // adjust path if needed
     "./routers/irrigation_eff_router.js", // adjust path if needed
     "./routers/fmc_router.js", // adjust path if needed
+    "./routers/energy_consumption_router.js", // adjust path if needed
+    "./routers/waste_management_router.js", // adjust path if needed
+    "./routers/workforce_diversity_router.js", // adjust path if needed
+    "./routers/health_safety_router.js", // adjust path if needed
+    "./routers/governance_board_router.js", // adjust path if needed
+    "./routers/community_engagement_router.js", // adjust path if needed
+    "./routers/overall_esg_router.js", // adjust path if needed
   ],
 };
 

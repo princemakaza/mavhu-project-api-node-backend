@@ -1,10 +1,15 @@
-const ESGData = require("../models/esg_data_model");
 const Company = require("../models/company_model");
+const ESGData = require("../models/esg_data_model");
+const WorkforceDiversityData = require("../models/workforce_diversity_model");
 const AppError = require("../utils/app_error");
-const mongoose = require("mongoose");
+
+// Version constants
+const API_VERSION = process.env.API_VERSION || "1.0.0";
+const CALCULATION_VERSION = process.env.CALCULATION_VERSION || "1.0.0";
+const GEE_ADAPTER_VERSION = process.env.GEE_ADAPTER_VERSION || "1.0.0";
 
 /**
- * Helper function to extract metric values by name with proper error handling
+ * Helper function to extract metric values by name with proper error handling (from ESGData)
  */
 async function getMetricsByNames(companyId, metricNames, years = []) {
   try {
@@ -140,7 +145,7 @@ function calculateTrend(values, years) {
 }
 
 /**
- * Helper function to extract SOCIAL ESG metrics for a company for specific years
+ * Helper function to extract SOCIAL ESG metrics for a company for specific years (from ESGData)
  */
 async function getSocialMetrics(companyId, years = []) {
   try {
@@ -246,13 +251,9 @@ async function getSocialMetrics(companyId, years = []) {
   }
 }
 
-// Version constants
-const API_VERSION = process.env.API_VERSION || "1.0.0";
-const CALCULATION_VERSION = process.env.CALCULATION_VERSION || "1.0.0";
-const GEE_ADAPTER_VERSION = process.env.GEE_ADAPTER_VERSION || "1.0.0";
-
 /**
  * Workforce Diversity API - Returns workforce diversity and social ESG data
+ * Includes both the full WorkforceDiversityData record and metrics from ESGData.
  */
 async function getWorkforceDiversityData(companyId, year = null) {
   try {
@@ -282,7 +283,13 @@ async function getWorkforceDiversityData(companyId, year = null) {
       throw new AppError("Company not found", 404, "NOT_FOUND");
     }
 
-    // Workforce-specific metrics
+    // Fetch the active WorkforceDiversityData record (dedicated model)
+    const workforceDataRecord = await WorkforceDiversityData.findOne({
+      company: companyId,
+      is_active: true,
+    }).lean();
+
+    // Workforce-specific metrics (to be fetched from ESGData)
     const workforceMetricNames = [
       "Human Capital - Total Employees",
       "Human Capital - Female Employees",
@@ -302,14 +309,14 @@ async function getWorkforceDiversityData(companyId, year = null) {
       "Employee Turnover - Involuntary turnover rate",
     ];
 
-    // Get workforce metrics
+    // Get workforce metrics from ESGData
     const workforceMetrics = await getMetricsByNames(
       companyId,
       workforceMetricNames,
       targetYears,
     );
 
-    // Get ALL SOCIAL ESG metrics for the selected year
+    // Get ALL SOCIAL ESG metrics for the selected year from ESGData
     const socialMetrics = await getSocialMetrics(companyId, targetYears);
 
     // Calculate key metrics for the target year
@@ -403,8 +410,6 @@ async function getWorkforceDiversityData(companyId, year = null) {
       },
     };
 
-
-
     // Prepare response data
     const response = {
       // API Metadata
@@ -416,6 +421,9 @@ async function getWorkforceDiversityData(companyId, year = null) {
         timestamp: new Date().toISOString(),
         requested_year: targetYear,
       },
+
+      // Include the full WorkforceDiversityData record (dedicated model)
+      workforce_diversity_data: workforceDataRecord || null,
 
       // Year Information
       year_data: {
@@ -557,10 +565,9 @@ async function getWorkforceDiversityData(companyId, year = null) {
       inclusion_and_belonging: {
         year: targetYear,
         metrics: inclusionMetrics,
-  
       },
 
-      // Social ESG Metrics for the selected year
+      // Social ESG Metrics for the selected year (from ESGData)
       social_metrics: {
         year: targetYear,
         total_metrics: socialMetrics.metadata.total_metrics,
@@ -573,7 +580,7 @@ async function getWorkforceDiversityData(companyId, year = null) {
         },
       },
 
-      // Workforce-specific metrics for detailed analysis
+      // Workforce-specific metrics for detailed analysis (from ESGData)
       detailed_workforce_metrics: {
         year: targetYear,
         metrics: workforceMetrics,

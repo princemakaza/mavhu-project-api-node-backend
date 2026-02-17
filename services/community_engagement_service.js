@@ -1,5 +1,6 @@
 const ESGData = require("../models/esg_data_model");
 const Company = require("../models/company_model");
+const CommunityEngagementData = require("../models/community_engagement_model"); // Added
 const AppError = require("../utils/app_error");
 
 // Version constants from environment variables
@@ -463,6 +464,12 @@ async function getCommunityEngagementData(companyId, year = null) {
       throw new AppError("Company not found", 404, "NOT_FOUND");
     }
 
+    // Fetch the active CommunityEngagementData record (dedicated model)
+    const communityRecord = await CommunityEngagementData.findOne({
+      company: companyId,
+      is_active: true,
+    }).lean();
+
     // Get complete ESG data for all categories
     const completeESGData = await getCompleteESGData(companyId, year);
 
@@ -526,6 +533,9 @@ async function getCommunityEngagementData(companyId, year = null) {
         gee_adapter: GEE_ADAPTER_VERSION,
         last_updated: new Date().toISOString(),
       },
+
+      // Include the full CommunityEngagementData record (dedicated model)
+      community_engagement_record: communityRecord || null,
 
       // Complete company information
       company: {
