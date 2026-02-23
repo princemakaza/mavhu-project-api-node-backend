@@ -386,7 +386,6 @@ router.post(
 router.get(
   "/admin",
   authenticate,
-  requireOwner,
   companyController.adminListCompanies,
 );
 
