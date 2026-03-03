@@ -17,6 +17,7 @@ const workforceDivRouter = require("./routers/workforce_diversity_router");
 const healthSafetyRouter = require("./routers/health_safety_router"); 
 const governanceBoardRouter = require("./routers/governance_board_router");
 const communityRouter = require("./routers/community_engagement_router");
+const permissionsRouter = require("./routers/api_permission_router");
 const overallEsgRouter = require("./routers/overall_esg_router");
 const { errorMiddleware } = require("./utils/error_handler");
 const setupSwagger = require("./middlewares/swagger");
@@ -53,6 +54,7 @@ app.use("/api/v1/health-safety", healthSafetyRouter);
 app.use("/api/v1/governance", governanceBoardRouter);
 app.use("/api/v1/community", communityRouter);
 app.use("/api/v1/esg", overallEsgRouter);
+app.use("/api/v1/permissions", permissionsRouter);
 app.use(errorMiddleware);
 
 // 404 handler

@@ -5058,6 +5058,7 @@ const options = {
     "./routers/governance_board_router.js", // adjust path if needed
     "./routers/community_engagement_router.js", // adjust path if needed
     "./routers/overall_esg_router.js", // adjust path if needed
+    "./routers/api_permission_router.js",
   ],
 };
 
